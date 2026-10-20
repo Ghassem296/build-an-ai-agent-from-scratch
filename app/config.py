@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
+
+def _get_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+
+    if value is None or not value.strip():
+        return default
+
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be an integer; received {value!r}"
+        ) from exc
+
+    return result
+
+
+def _get_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+
+    if value is None or not value.strip():
+        return default
+
+    try:
+        result = float(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} must be a number; received {value!r}"
+        ) from exc
+
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class Settings:
+    llm_model: str
+    llm_api_key: str | None
+    llm_api_base: str | None
+    llm_temperature: float
+    llm_timeout: float
+    agent_max_steps: int
+    tool_timeout: float
+    log_level: str
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        model = os.getenv(
+            "LLM_MODEL",
+            "openai/gemini-2.5-flash",
+        ).strip()
+
+        if not model:
+            raise ValueError("LLM_MODEL cannot be empty")
+
+        temperature = _get_float("LLM_TEMPERATURE", 0.0)
+        llm_timeout = _get_float("LLM_TIMEOUT", 60.0)
+        tool_timeout = _get_float("TOOL_TIMEOUT", 30.0)
+        max_steps = _get_int("AGENT_MAX_STEPS", 10)
+
+        if not 0.0 <= temperature <= 2.0:
+            raise ValueError("LLM_TEMPERATURE must be between 0 and 2")
+
+        if llm_timeout <= 0:
+            raise ValueError("LLM_TIMEOUT must be greater than zero")
+
+        if tool_timeout <= 0:
+            raise ValueError("TOOL_TIMEOUT must be greater than zero")
+
+        if max_steps < 1:
+            raise ValueError("AGENT_MAX_STEPS must be at least 1")
+
+        api_key = (
+            os.getenv("LLM_API_KEY")
+            or os.getenv("XAI_1_API_KEY")
+            or None
+        )
+
+        api_base = (
+            os.getenv("LLM_API_BASE")
+            or os.getenv("OPENAI_API_BASE")
+            or None
+        )
+
+        log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+        valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}
+
+        if log_level not in valid_levels:
+            raise ValueError(
+                f"LOG_LEVEL must be one of {sorted(valid_levels)}"
+            )
+
+        return cls(
+            llm_model=model,
+            llm_api_key=api_key,
+            llm_api_base=api_base,
+            llm_temperature=temperature,
+            llm_timeout=llm_timeout,
+            agent_max_steps=max_steps,
+            tool_timeout=tool_timeout,
+            log_level=log_level,
+        )
+
+
+settings = Settings.from_env()

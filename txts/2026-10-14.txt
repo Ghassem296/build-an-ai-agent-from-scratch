@@ -1,0 +1,146 @@
+# Build an AI Agent (From Scratch) — Learning Progress Checkpoint
+
+## 1. Book and Project
+
+**Book:** Build an AI Agent (From Scratch)  
+**Authors:** Jungjun Hur and Younghee Song
+
+**Project directory:**
+
+`C:\Users\Ghassem BAKHTIARI\Desktop\build-an-ai-agent-from-scratch`
+
+**Purpose:** Learn AI agent development step by step by studying the book, understanding its examples, adapting the code to the existing environment, and testing each implementation in VS Code.
+
+## 2. Development Environment
+
+- Operating system: Windows
+- Code editor: Visual Studio Code
+- Terminal: PowerShell
+- Python: 3.11.9
+- Package manager: `uv`
+- Virtual environment: `.venv`
+- LLM client: LiteLLM
+- API endpoint: `https://1xai.ir/v1`
+- Model: `openai/gpt-5-mini`
+- Environment variable for API key: `XAI_1_API_KEY`
+
+The API key is stored in `.env` and must not be exposed in source code or shared output.
+
+The project uses VS Code and PowerShell. Jupyter Notebook is not required.
+
+## 3. Learning Approach
+
+The book is being studied sequentially, section by section.
+
+For each section:
+
+1. Translate the relevant passage into Persian.
+2. Explain the underlying concepts and execution flow.
+3. Adapt the book's code to the existing project configuration.
+4. Run the code in VS Code.
+5. Review the actual output and resolve problems before proceeding.
+
+The priority is understanding how the program works, not merely copying code.
+
+Avoid unnecessary environment changes, unrelated installations, and premature connections to other projects.
+
+## 4. Concepts Studied
+
+### 4.1 Structured Output
+
+The book explains why natural-language output is inconvenient for programmatic processing and why structured formats such as JSON are useful.
+
+The discussion included the Python declaration:
+
+`class ExtractedInfo(BaseModel)`
+
+The objective is to understand how Pydantic models define and validate structured data.
+
+### 4.2 Asynchronous Python
+
+The following concepts have been covered:
+
+- `async def`: Defines an asynchronous function.
+- Coroutine: An asynchronous computation represented by a coroutine object when the function is called.
+- `await`: Waits for an awaitable operation while allowing other tasks to progress.
+- `asyncio.run()`: Runs the asynchronous entry-point function.
+- `asyncio.gather()`: Runs multiple awaitables concurrently and collects their results.
+- `zip()`: Pairs corresponding elements from iterables.
+- `asyncio.Semaphore`: Limits the number of tasks entering a protected asynchronous section.
+- `num_retries`: Configures retry attempts in LiteLLM.
+- `return_exceptions=True`: Allows exceptions to be returned as results instead of propagating an individual task's failure through `gather()`.
+
+### 4.3 Initial Asynchronous LLM Example
+
+The book's asynchronous example was adapted to the existing API.
+
+The implementation uses:
+
+- `acompletion()` from LiteLLM
+- `MODEL_NAME = "openai/gpt-5-mini"`
+- `API_BASE = "https://1xai.ir/v1"`
+- `API_KEY = os.getenv("XAI_1_API_KEY")`
+
+The program sends three prompts concurrently and displays each question with its corresponding response.
+
+The initial API credential error was resolved by explicitly supplying the project's `api_base` and `api_key`.
+
+### 4.4 Rate-Limited Concurrent Requests
+
+The next book example introduced concurrency control and retry handling.
+
+The adapted program uses:
+
+`semaphore = asyncio.Semaphore(10)`
+
+The `call_llm()` function places the `acompletion()` call inside an `async with semaphore` block and configures:
+
+`num_retries=3`
+
+The main function creates 100 arithmetic prompts, creates a coroutine for each prompt, and collects results using:
+
+`await asyncio.gather(*tasks, return_exceptions=True)`
+
+Successful results and exceptions are handled separately when displaying the output.
+
+**Test result:** All 100 arithmetic questions returned responses successfully in the observed run.
+
+This confirms that the test completed successfully. Execution time and the actual number of simultaneous API calls have not yet been measured.
+
+## 5. Current Implementation Structure
+
+The current `main.py` follows this flow:
+
+1. Import `asyncio`, `os`, `load_dotenv`, and `acompletion`.
+2. Load environment variables.
+3. Define the model, API endpoint, and API key.
+4. Create a semaphore with a limit of 10.
+5. Define the asynchronous `call_llm(prompt: str) -> str` function.
+6. Call the LLM through LiteLLM with automatic retry configuration.
+7. Generate 100 arithmetic questions.
+8. Create coroutine objects for the questions.
+9. Run them concurrently using `asyncio.gather()`.
+10. Display successful responses and errors.
+11. Start the program using `asyncio.run(main())`.
+
+## 6. Immediate Next Step
+
+Before moving to the next book section:
+
+1. Measure execution time using `time.perf_counter()`.
+2. Compare concurrent execution against sequential execution.
+3. Understand the difference between limiting concurrent requests and limiting requests per minute.
+4. Continue to the next section of the book after understanding the current implementation.
+
+## 7. Learning Preferences
+
+- Explain concepts in Persian unless English is explicitly requested.
+- Follow the book in order.
+- Work in VS Code and PowerShell.
+- Use the existing virtual environment and API configuration.
+- Explain program logic and execution flow, not just Python syntax.
+- Make small, testable changes.
+- Avoid Jupyter unless explicitly requested.
+- Do not connect this learning project to KumoView or other projects unless explicitly requested.
+
+**Current checkpoint:** The asynchronous LLM example and the 100-request semaphore-controlled test have run successfully. The next task is to measure execution time and compare concurrent versus sequential execution, then continue with the next book section.
