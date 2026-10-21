@@ -153,6 +153,43 @@ class TestExecutionContext(unittest.TestCase):
         with self.assertRaises(ValueError):
             context.truncate_history(max_events=0)
 
+def test_truncate_history_preserves_tool_call_pairs(self):
+    """Truncation must not split a tool_call from its tool_result."""
+    from app.llm_client import Message, ToolCall, ToolResult
+
+    context = ExecutionContext()
+    context.create_event("system", "sys")
+
+    # Turn 1: user + assistant(tool_call) + tool(result) + assistant(text)
+    context.create_event("user", [Message(role="user", content="q1")])
+    context.create_event("assistant", [
+        ToolCall(id="call-1", name="search_web", arguments={"query": "x"})
+    ])
+    context.create_event("tool", [
+        ToolResult(tool_call_id="call-1", name="search_web", content="r1")
+    ])
+    context.create_event("assistant", [Message(role="assistant", content="a1")])
+
+    # Turn 2: user + assistant(text)
+    context.create_event("user", [Message(role="user", content="q2")])
+    context.create_event("assistant", [Message(role="assistant", content="a2")])
+
+    # Ask for only 2 non-system events.
+    context.truncate_history(max_events=3, keep_system=True)
+
+    # We should keep: system + turn 2 (user q2, assistant a2).
+    # Turn 1 must be dropped entirely (not partially).
+    types = [e.type for e in context.events]
+    self.assertEqual(types, ["system", "user", "assistant"])
+    self.assertEqual(
+        context.events[1].content[0].content,
+        "q2",
+    )
+    self.assertEqual(
+        context.events[2].content[0].content,
+        "a2",
+    )
+
 
 if __name__ == "__main__":
     unittest.main()
