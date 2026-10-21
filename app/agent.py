@@ -200,7 +200,7 @@ class Agent:
         - Build the LLM request from the current context.
         - Ask the LLM (via ``think()``) what to do next.
         - If the LLM requested tool calls, execute them (via
-          ``_execute_tool()``) and record the results in the context.
+          ``act()``) and record the results in the context.
 
         Returns the ``LlmResponse`` so the caller can decide whether
         the loop should continue or stop.
@@ -219,7 +219,24 @@ class Agent:
         if not tool_calls:
             return response
 
-        # Execute calls sequentially to keep behavior predictable.
+        tool_results = await self.act(context, tool_calls)
+
+        context.create_event("tool", tool_results)
+
+        return response
+
+    async def act(
+        self,
+        context: ExecutionContext,
+        tool_calls: list[ToolCall],
+    ) -> list[ToolResult]:
+        """Execute the tool calls requested by the LLM.
+
+        Currently calls are executed sequentially so the behavior
+        stays predictable. This is the natural place to add
+        parallelism (``asyncio.gather``) or human-in-the-loop
+        approval later.
+        """
         tool_results: list[ToolResult] = []
 
         for tool_call in tool_calls:
@@ -238,9 +255,7 @@ class Agent:
                 result.is_error,
             )
 
-        context.create_event("tool", tool_results)
-
-        return response
+        return tool_results
 
     @staticmethod
     def _has_tool_calls(response: LlmResponse) -> bool:
