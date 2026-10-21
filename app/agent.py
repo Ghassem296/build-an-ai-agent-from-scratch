@@ -5,6 +5,8 @@ import logging
 from typing import Any
 from uuid import uuid4
 
+import jsonschema
+
 from app.execution_context import ExecutionContext
 from app.llm_client import (
     LlmClient,
@@ -66,6 +68,7 @@ class Agent:
 
         self.context: ExecutionContext | None = None
         self._allowed_tools: set[str] = set()
+        self._tool_schemas: dict[str, dict[str, Any]] = {}
         self._tool_definitions: list[dict[str, Any]] = []
 
     def seed_system_prompt(self, context: ExecutionContext) -> None:
@@ -166,6 +169,7 @@ class Agent:
 
         definitions: list[dict[str, Any]] = []
         self._allowed_tools = set()
+        self._tool_schemas = {}
 
         for tool in response.tools:
             self._allowed_tools.add(tool.name)
@@ -177,6 +181,8 @@ class Agent:
                     "type": "object",
                     "properties": {},
                 }
+
+            self._tool_schemas[tool.name] = input_schema
 
             definitions.append(
                 {
@@ -263,8 +269,7 @@ class Agent:
     ) -> list[ToolResult]:
         """Execute the tool calls requested by the LLM.
 
-        Only tools whose names appear in ``self._allowed_tools`` are
-        executed. Unknown tools are rejected with a ToolResult error.
+        Validates tool names and arguments before execution.
         """
         await self._ensure_tool_definitions()
 
@@ -289,6 +294,33 @@ class Agent:
                     )
                 )
                 continue
+
+            schema = self._tool_schemas.get(tool_call.name)
+
+            if schema is not None:
+                try:
+                    jsonschema.validate(
+                        instance=tool_call.arguments,
+                        schema=schema,
+                    )
+                except jsonschema.ValidationError as exc:
+                    logger.warning(
+                        "Invalid arguments for tool %r: %s",
+                        tool_call.name,
+                        exc.message,
+                    )
+                    tool_results.append(
+                        ToolResult(
+                            tool_call_id=tool_call.id,
+                            name=tool_call.name,
+                            content=(
+                                f"Invalid arguments for {tool_call.name!r}: "
+                                f"{exc.message}"
+                            ),
+                            is_error=True,
+                        )
+                    )
+                    continue
 
             logger.debug(
                 "LLM requested MCP tool: %s; arguments=%s",
@@ -316,12 +348,7 @@ class Agent:
         )
 
     async def _execute_tool(self, tool_call: ToolCall) -> ToolResult:
-        """Execute one MCP tool call and normalize its result.
-
-        Errors are logged with full detail but the model only sees a
-        generic message. This prevents leaking internal paths or
-        implementation details through the conversation.
-        """
+        """Execute one MCP tool call and normalize its result."""
         logger.info(
             "Calling MCP tool %s",
             tool_call.name,
