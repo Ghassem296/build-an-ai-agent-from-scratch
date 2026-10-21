@@ -65,12 +65,10 @@ class Agent:
         )
 
         self.context: ExecutionContext | None = None
+        self._allowed_tools: set[str] = set()
 
     def seed_system_prompt(self, context: ExecutionContext) -> None:
-        """Add the system prompt to a context if not already present.
-
-        Idempotent: calling twice does not duplicate the event.
-        """
+        """Add the system prompt to a context if not already present."""
         if not self.system_prompt:
             return
 
@@ -117,10 +115,7 @@ class Agent:
 
         logger.info(
             "Available MCP tools: %s",
-            [
-                item["function"]["name"]
-                for item in tool_definitions
-            ],
+            sorted(self._allowed_tools),
         )
 
         for step in range(max_steps):
@@ -152,7 +147,10 @@ class Agent:
         return await self._request_final_answer(context)
 
     async def _get_tool_definitions(self) -> list[dict[str, Any]]:
-        """Convert MCP tool schemas to the LiteLLM/OpenAI tool format."""
+        """Convert MCP tool schemas to the LiteLLM/OpenAI tool format.
+
+        Also records the set of allowed tool names for later checks.
+        """
         try:
             response = await self.mcp_session.list_tools()
         except asyncio.CancelledError:
@@ -162,8 +160,11 @@ class Agent:
             raise
 
         definitions: list[dict[str, Any]] = []
+        self._allowed_tools = set()
 
         for tool in response.tools:
+            self._allowed_tools.add(tool.name)
+
             input_schema = getattr(tool, "inputSchema", None)
 
             if not isinstance(input_schema, dict):
@@ -252,10 +253,33 @@ class Agent:
         context: ExecutionContext,
         tool_calls: list[ToolCall],
     ) -> list[ToolResult]:
-        """Execute the tool calls requested by the LLM."""
+        """Execute the tool calls requested by the LLM.
+
+        Only tools whose names appear in ``self._allowed_tools`` are
+        executed. Unknown tools are rejected with a ToolResult error.
+        """
         tool_results: list[ToolResult] = []
 
         for tool_call in tool_calls:
+            if tool_call.name not in self._allowed_tools:
+                logger.warning(
+                    "Rejected unknown tool %r (allowed: %s)",
+                    tool_call.name,
+                    sorted(self._allowed_tools),
+                )
+                tool_results.append(
+                    ToolResult(
+                        tool_call_id=tool_call.id,
+                        name=tool_call.name,
+                        content=(
+                            f"Unknown tool {tool_call.name!r}. "
+                            f"Allowed tools: {sorted(self._allowed_tools)}"
+                        ),
+                        is_error=True,
+                    )
+                )
+                continue
+
             logger.info(
                 "LLM requested MCP tool: %s; arguments=%s",
                 tool_call.name,
@@ -282,7 +306,12 @@ class Agent:
         )
 
     async def _execute_tool(self, tool_call: ToolCall) -> ToolResult:
-        """Execute one MCP tool call and normalize its result."""
+        """Execute one MCP tool call and normalize its result.
+
+        Errors are logged with full detail but the model only sees a
+        generic message. This prevents leaking internal paths or
+        implementation details through the conversation.
+        """
         logger.info(
             "Calling MCP tool %s",
             tool_call.name,
@@ -331,7 +360,7 @@ class Agent:
                 is_error=True,
             )
 
-        except Exception as exc:
+        except Exception:
             logger.exception(
                 "MCP tool call %s failed",
                 tool_call.name,
@@ -339,7 +368,10 @@ class Agent:
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
-                content=f"{type(exc).__name__}: {exc}",
+                content=(
+                    "Tool execution failed. "
+                    "Please try a different approach."
+                ),
                 is_error=True,
             )
 
@@ -407,13 +439,10 @@ class Agent:
         """Request a final response without allowing additional tool calls.
 
         The step-limit message is added ONLY to this request, not to
-        the persistent context. This prevents the message from leaking
-        into future turns in interactive mode.
+        the persistent context.
         """
         request = self._prepare_llm_request(context, tools=[])
 
-        # Prepend a one-shot system message that is NOT stored in
-        # the persistent context.
         request.messages = [
             Message(
                 role="system",

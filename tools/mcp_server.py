@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("web-search")
 
 
-async def _search_sync(
+def _search_sync(
     query: str,
     max_results: int,
 ) -> list[dict[str, Any]]:
@@ -79,7 +79,11 @@ async def search_web(
                 await asyncio.sleep(backoff)
                 backoff *= 2
 
-    logger.exception("Web search failed after %d attempts", max_attempts)
+    logger.error(
+        "Web search failed after %d attempts: %s",
+        max_attempts,
+        last_error,
+    )
     raise RuntimeError(
         f"Web search failed after {max_attempts} attempts: {last_error}"
     )

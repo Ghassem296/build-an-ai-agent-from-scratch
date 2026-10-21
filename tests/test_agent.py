@@ -225,8 +225,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         final_request = self.llm_client.complete.await_args_list[1].args[0]
         self.assertEqual(final_request.tools, [])
 
-        # The step-limit message is the very first message in the
-        # final request (prepended, not stored in the persistent context).
         self.assertIsInstance(final_request.messages[0], Message)
         self.assertEqual(final_request.messages[0].role, "system")
         self.assertIn(
@@ -365,8 +363,11 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertTrue(result.is_error)
-        self.assertIn("RuntimeError", result.content)
-        self.assertIn("Simulated MCP failure", result.content)
+        # The raw exception text must NOT leak to the model.
+        self.assertNotIn("RuntimeError", result.content)
+        self.assertNotIn("Simulated MCP failure", result.content)
+        # A generic user-friendly message is returned instead.
+        self.assertIn("Tool execution failed", result.content)
 
     async def test_tool_result_normalization(self):
         result = SimpleNamespace(
