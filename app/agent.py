@@ -9,6 +9,7 @@ from app.execution_context import ExecutionContext
 from app.llm_client import (
     LlmClient,
     LlmRequest,
+    LlmResponse,
     Message,
     ToolCall,
     ToolResult,
@@ -94,7 +95,7 @@ class Agent:
                 tools=tool_definitions,
             )
 
-            response = await self.llm_client.complete(request)
+            response = await self.think(request)
             context.create_event("assistant", response.content)
 
             tool_calls = [
@@ -206,6 +207,15 @@ class Agent:
             messages=messages,
             tools=tools or [],
         )
+
+    async def think(self, request: LlmRequest) -> LlmResponse:
+        """Send the request to the LLM and return its response.
+
+        This is a thin wrapper around ``llm_client.complete`` so that
+        future extensions (retries, callbacks, logging) can be added
+        in one place without touching the main loop.
+        """
+        return await self.llm_client.complete(request)
 
     async def _execute_tool(self, tool_call: ToolCall) -> ToolResult:
         """Execute one MCP tool call and normalize its result."""
@@ -329,7 +339,7 @@ class Agent:
         request = self._prepare_llm_request(context, tools=[])
 
         try:
-            response = await self.llm_client.complete(request)
+            response = await self.think(request)
         except asyncio.CancelledError:
             # Cancellation must always propagate so the caller can
             # shut down cleanly.
