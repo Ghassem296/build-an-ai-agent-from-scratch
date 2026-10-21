@@ -5,8 +5,9 @@ import asyncio
 import logging
 import os
 import sys
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path
+from typing import AsyncIterator
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -17,7 +18,6 @@ from app.execution_context import ExecutionContext
 from app.llm_client import LlmClient
 
 
-# Project root: parent of the app directory.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -33,8 +33,6 @@ def configure_logging() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    # Only enable noisy third-party DEBUG logs when the user
-    # explicitly asked for DEBUG via LOG_LEVEL.
     if log_level == logging.DEBUG:
         logging.getLogger("LiteLLM").setLevel(logging.DEBUG)
         logging.getLogger("litellm").setLevel(logging.DEBUG)
@@ -58,8 +56,19 @@ def build_mcp_environment() -> dict[str, str]:
         "USERPROFILE",
         "APPDATA",
         "LOCALAPPDATA",
+        "HOME",
+        "LANG",
+        "LC_ALL",
         "PYTHONIOENCODING",
         "PYTHONUTF8",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
     )
 
     env = {
@@ -75,7 +84,6 @@ def build_mcp_environment() -> dict[str, str]:
 
 
 def create_llm_client() -> LlmClient:
-    """Create a fresh LLM client from the current settings."""
     return LlmClient(
         model=settings.llm_model,
         api_key=settings.llm_api_key,
@@ -85,8 +93,9 @@ def create_llm_client() -> LlmClient:
     )
 
 
-async def run_agent(prompt: str) -> str:
-    """Run the agent once for a single prompt (non-interactive mode)."""
+@asynccontextmanager
+async def mcp_session() -> AsyncIterator[ClientSession]:
+    """Open an MCP session, yielding a ready ClientSession."""
     server_params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "tools.mcp_server"],
@@ -105,6 +114,11 @@ async def run_agent(prompt: str) -> str:
 
         await session.initialize()
 
+        yield session
+
+
+async def run_agent(prompt: str) -> str:
+    async with mcp_session() as session:
         agent = Agent(
             llm_client=create_llm_client(),
             mcp_session=session,
@@ -133,39 +147,15 @@ def parse_args() -> argparse.Namespace:
 
 
 async def interactive_loop() -> None:
-    """Interactive mode with a *single* Agent shared across turns.
-
-    The same MCP session and the same ExecutionContext are reused for
-    every user prompt, so the agent remembers earlier turns.
-    """
     logger = logging.getLogger(__name__)
 
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "tools.mcp_server"],
-        cwd=str(PROJECT_ROOT),
-        env=build_mcp_environment(),
-    )
-
-    async with AsyncExitStack() as stack:
-        read_stream, write_stream = await stack.enter_async_context(
-            stdio_client(server_params)
-        )
-
-        session = await stack.enter_async_context(
-            ClientSession(read_stream, write_stream)
-        )
-
-        await session.initialize()
-
-        # One agent for the whole session → conversation continuity.
+    async with mcp_session() as session:
         agent = Agent(
             llm_client=create_llm_client(),
             mcp_session=session,
             tool_timeout=settings.tool_timeout,
         )
 
-        # One ExecutionContext for the whole session.
         session_context = ExecutionContext()
         agent.seed_system_prompt(session_context)
 

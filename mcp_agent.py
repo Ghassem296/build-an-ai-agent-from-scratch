@@ -23,6 +23,46 @@ AGENT_INSTRUCTIONS = (
 )
 
 
+def build_mcp_environment() -> dict[str, str]:
+    """Pass only the environment variables required by the MCP server."""
+    import os
+
+    allowed_names = (
+        "PATH",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PYTHONIOENCODING",
+        "PYTHONUTF8",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+    )
+
+    env = {
+        name: os.environ[name]
+        for name in allowed_names
+        if name in os.environ
+    }
+
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+
+    return env
+
+
 async def main() -> None:
     """Connect to the MCP server and run the agent."""
 
@@ -44,7 +84,7 @@ async def main() -> None:
         command=sys.executable,
         args=["-m", "tools.mcp_server"],
         cwd=str(PROJECT_DIR),
-        env=None,
+        env=build_mcp_environment(),
     )
 
     async with stdio_client(server_params) as (
