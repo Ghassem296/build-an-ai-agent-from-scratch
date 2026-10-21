@@ -500,6 +500,46 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Simulated final API failure", answer)
         self.assertEqual(self.mcp_session.call_tool.await_count, 1)
 
+    async def test_act_rejects_unknown_tool(self):
+        """Unknown tools must be rejected with a ToolResult error."""
+        context = ExecutionContext()
 
+        tool_results = await self.agent.act(
+            context,
+            [
+                ToolCall(
+                    id="call-bad",
+                    name="does_not_exist",
+                    arguments={},
+                )
+            ],
+        )
+
+        self.assertEqual(len(tool_results), 1)
+        self.assertTrue(tool_results[0].is_error)
+        self.assertIn("Unknown tool", tool_results[0].content)
+        self.mcp_session.call_tool.assert_not_awaited()
+
+    async def test_act_executes_allowed_tool(self):
+        """Allowed tools must be executed normally."""
+        context = ExecutionContext()
+
+        tool_results = await self.agent.act(
+            context,
+            [
+                ToolCall(
+                    id="call-ok",
+                    name="search_web",
+                    arguments={"query": "test"},
+                )
+            ],
+        )
+
+        self.assertEqual(len(tool_results), 1)
+        self.assertFalse(tool_results[0].is_error)
+        self.mcp_session.call_tool.assert_awaited_once_with(
+            "search_web",
+            {"query": "test"},
+        )
 if __name__ == "__main__":
     unittest.main()
