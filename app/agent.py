@@ -33,6 +33,9 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+MAX_TOOL_RESULT_CHARS = 10_000
+
+
 class Agent:
     """An asynchronous agent that uses an LLM and MCP tools."""
 
@@ -343,30 +346,49 @@ class Agent:
 
     @staticmethod
     def _normalize_tool_result(result: Any) -> str:
-        """Convert MCP result content into readable text."""
+        """Convert MCP result content into readable text.
+
+        Very large tool outputs are truncated to ``MAX_TOOL_RESULT_CHARS``
+        to keep the context window under control and reduce the risk of
+        prompt injection from untrusted search results.
+        """
         content = getattr(result, "content", None)
 
         if content is None:
             if hasattr(result, "model_dump"):
-                return str(result.model_dump())
-            return str(result)
-
-        if isinstance(content, str):
-            return content
-
-        parts: list[str] = []
-
-        for item in content:
-            text = getattr(item, "text", None)
-
-            if text is not None:
-                parts.append(str(text))
-            elif hasattr(item, "model_dump"):
-                parts.append(str(item.model_dump()))
+                normalized = str(result.model_dump())
             else:
-                parts.append(str(item))
+                normalized = str(result)
+        elif isinstance(content, str):
+            normalized = content
+        else:
+            parts: list[str] = []
 
-        return "\n".join(parts)
+            for item in content:
+                text = getattr(item, "text", None)
+
+                if text is not None:
+                    parts.append(str(text))
+                elif hasattr(item, "model_dump"):
+                    parts.append(str(item.model_dump()))
+                else:
+                    parts.append(str(item))
+
+            normalized = "\n".join(parts)
+
+        if len(normalized) > MAX_TOOL_RESULT_CHARS:
+            logger.warning(
+                "Tool result truncated from %d to %d characters",
+                len(normalized),
+                MAX_TOOL_RESULT_CHARS,
+            )
+            normalized = (
+                normalized[:MAX_TOOL_RESULT_CHARS]
+                + f"\n\n[truncated: {len(normalized) - MAX_TOOL_RESULT_CHARS} "
+                f"characters omitted]"
+            )
+
+        return normalized
 
     @staticmethod
     def _store_final_result(content: list[Any]) -> str:
