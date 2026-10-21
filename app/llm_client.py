@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -70,7 +71,7 @@ class LlmClient:
         temperature: float = 0.0,
         timeout: float = 60.0,
         tools: list[dict[str, Any]] | None = None,
-        max_retries: int = 2,              # ← NEW
+        max_retries: int = 2,
     ) -> None:
         if not 0.0 <= temperature <= 2.0:
             raise ValueError("temperature must be between 0 and 2")
@@ -78,7 +79,7 @@ class LlmClient:
         if timeout <= 0:
             raise ValueError("timeout must be greater than 0")
 
-        if max_retries < 0:                 # ← NEW
+        if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
 
         self.model = model
@@ -95,7 +96,7 @@ class LlmClient:
         self.temperature = temperature
         self.timeout = timeout
         self.tools = tools or []
-        self.max_retries = max_retries      # ← NEW
+        self.max_retries = max_retries
 
     async def complete(self, request: LlmRequest) -> LlmResponse:
         """Send a conversation to the model and normalize its response."""
@@ -117,7 +118,7 @@ class LlmClient:
             "messages": self._build_messages(request.messages),
             "temperature": temperature,
             "timeout": self.timeout,
-            "num_retries": self.max_retries,    # ← NEW
+            "num_retries": self.max_retries,
         }
 
         if self.api_key:
@@ -159,27 +160,9 @@ class LlmClient:
     def _build_messages(
         items: list[Message | ToolCall | ToolResult],
     ) -> list[dict[str, Any]]:
-        """Convert normalized conversation items to API messages.
-
-        Invariant
-        ---------
-        A ``ToolCall`` is only valid inside an assistant message that
-        belongs to the *current* assistant turn. A turn ends as soon as
-        either:
-
-        * a ``ToolResult`` for that turn is appended, or
-        * a non-assistant message (user/system) is appended.
-
-        Any ``ToolCall`` that arrives after the current turn has ended
-        starts a brand new assistant message with ``content=None``.
-        Consecutive tool calls within the same turn are grouped onto
-        the same assistant message.
-        """
+        """Convert normalized conversation items to API messages."""
 
         messages: list[dict[str, Any]] = []
-
-        # The assistant message that is still accepting tool calls,
-        # or ``None`` if the current turn has been closed.
         open_assistant: dict[str, Any] | None = None
 
         for item in items:
@@ -298,26 +281,48 @@ class LlmClient:
                 name = getattr(function, "name", "")
                 raw_arguments = getattr(function, "arguments", "{}")
 
+            # Issue #5: some gateways (notably Gemini via the
+            # OpenAI-compatible API) return empty or missing ids.
+            # Generate a fallback so tool_call_id matching still works.
+            if not call_id:
+                call_id = f"call_{uuid.uuid4().hex}"
+                logger.warning(
+                    "Tool call %r had no id; generated fallback %s",
+                    name,
+                    call_id,
+                )
+
+            # Issue #4: invalid JSON arguments must not crash the
+            # whole run. Pass an empty dict and let the model retry.
             if isinstance(raw_arguments, dict):
                 arguments = raw_arguments
             elif isinstance(raw_arguments, str):
                 try:
                     parsed_arguments = json.loads(raw_arguments or "{}")
-                except json.JSONDecodeError as exc:
-                    raise ValueError(
-                        f"Invalid JSON arguments for tool {name!r}"
-                    ) from exc
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Tool %r returned invalid JSON arguments: %r",
+                        name,
+                        raw_arguments,
+                    )
+                    parsed_arguments = {}
 
                 if not isinstance(parsed_arguments, dict):
-                    raise ValueError(
-                        f"Arguments for tool {name!r} must be a JSON object"
+                    logger.warning(
+                        "Tool %r arguments were not a JSON object: %r",
+                        name,
+                        parsed_arguments,
                     )
+                    parsed_arguments = {}
 
                 arguments = parsed_arguments
             else:
-                raise ValueError(
-                    f"Invalid arguments for tool {name!r}"
+                logger.warning(
+                    "Tool %r returned unsupported argument type: %r",
+                    name,
+                    type(raw_arguments),
                 )
+                arguments = {}
 
             content.append(
                 ToolCall(
