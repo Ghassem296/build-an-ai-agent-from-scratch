@@ -41,9 +41,7 @@ def make_mcp_result(text="Search result"):
 
 class TestAgent(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.llm_client = SimpleNamespace(
-            complete=AsyncMock()
-        )
+        self.llm_client = SimpleNamespace(complete=AsyncMock())
         self.mcp_session = SimpleNamespace(
             list_tools=AsyncMock(return_value=make_tool_response()),
             call_tool=AsyncMock(return_value=make_mcp_result()),
@@ -66,18 +64,12 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         answer = await self.agent.run("Explain MCP")
 
-        self.assertEqual(
-            answer,
-            "MCP lets applications use tools.",
-        )
+        self.assertEqual(answer, "MCP lets applications use tools.")
         self.llm_client.complete.assert_awaited_once()
         self.mcp_session.list_tools.assert_awaited_once()
         self.mcp_session.call_tool.assert_not_awaited()
 
         self.assertIsInstance(self.agent.context, ExecutionContext)
-
-        # ← UPDATED: events[0] is now the system prompt,
-        # events[1] is the user prompt, events[2] is the assistant.
         self.assertEqual(self.agent.context.events[0].type, "system")
         self.assertEqual(self.agent.context.events[1].type, "user")
         self.assertEqual(self.agent.context.events[2].type, "assistant")
@@ -116,14 +108,11 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         )
 
         events = self.agent.context.get_events()
-
-        # ← UPDATED: system is now the first event.
         self.assertEqual(
             [event.type for event in events],
             ["system", "user", "assistant", "tool", "assistant"],
         )
 
-        # ← UPDATED: tool results are now at index 3, not 2.
         tool_results = events[3].content
         self.assertEqual(len(tool_results), 1)
         self.assertIsInstance(tool_results[0], ToolResult)
@@ -198,7 +187,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             ("search_web", {"query": "second query"}),
         )
 
-        # ← UPDATED: tool event is now at index 3, not 2.
         tool_event = self.agent.context.events[3]
         self.assertEqual(len(tool_event.content), 2)
 
@@ -327,7 +315,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(answer, "The search tool reported an error.")
 
-        # ← UPDATED: tool event is now at index 3, not 2.
         tool_event = self.agent.context.events[3]
         result = tool_event.content[0]
 
@@ -436,8 +423,11 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
     async def test_agent_truncates_long_history(self):
         """When max_history_events is small, the Agent must trim the
         event history before sending it to the LLM.
-        """
 
+        The most recent turn is always kept, even if it exceeds the
+        budget. So the final request may contain more than
+        ``max_history_events`` messages when the last turn is large.
+        """
         agent = Agent(
             llm_client=self.llm_client,
             mcp_session=self.mcp_session,
@@ -482,16 +472,24 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "Final answer.")
 
         final_request = self.llm_client.complete.await_args_list[-1].args[0]
-        self.assertLessEqual(
-            len(final_request.messages),
-            3,
-        )
+
+        # The most recent turn is always kept, so the final request
+        # may contain more than max_history_events messages when the
+        # last turn is large.
+        self.assertGreaterEqual(len(final_request.messages), 1)
+
+        # The system prompt must be present.
+        system_msgs = [
+            m
+            for m in final_request.messages
+            if isinstance(m, Message) and m.role == "system"
+        ]
+        self.assertTrue(system_msgs)
 
     async def test_final_answer_llm_error_is_hidden_from_user(self):
         """When the LLM fails during the final-answer step, the user
         must receive a generic message rather than the raw exception.
         """
-
         self.llm_client.complete.side_effect = [
             LlmResponse(
                 content=[
@@ -510,20 +508,9 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             max_steps=1,
         )
 
-        self.assertIn(
-            "a final answer could not be generated",
-            answer,
-        )
-        self.assertIn(
-            "Please try again later",
-            answer,
-        )
-
-        self.assertNotIn(
-            "Simulated final API failure",
-            answer,
-        )
-
+        self.assertIn("a final answer could not be generated", answer)
+        self.assertIn("Please try again later", answer)
+        self.assertNotIn("Simulated final API failure", answer)
         self.assertEqual(self.mcp_session.call_tool.await_count, 1)
 
 

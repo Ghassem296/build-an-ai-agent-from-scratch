@@ -69,6 +69,10 @@ class ExecutionContext:
 
         We cut only at turn boundaries so the truncated history is
         still valid for the API.
+
+        The most recent turn is ALWAYS kept, even if it exceeds the
+        budget. This guarantees the user's current question is never
+        lost.
         """
 
         if max_events < 1:
@@ -95,26 +99,31 @@ class ExecutionContext:
         for event in non_system:
             current_turn.append(event)
 
-            # A turn ends when we see an assistant message that has
-            # NO tool calls (i.e. the final answer of the turn).
             if event.type == "assistant" and not _contains_tool_call(
                 event.content
             ):
                 turns.append(current_turn)
                 current_turn = []
 
-        # Any leftover events form a final (incomplete) turn.
         if current_turn:
             turns.append(current_turn)
 
         # 3. Keep the newest turns that fit in the budget.
+        #    The most recent turn is always kept.
         remaining = max(1, max_events - len(system_events))
         kept_turns: list[list[Event]] = []
         used = 0
 
         for turn in reversed(turns):
+            if not kept_turns:
+                # Always keep the most recent turn.
+                kept_turns.append(turn)
+                used += len(turn)
+                continue
+
             if used + len(turn) > remaining:
                 break
+
             kept_turns.append(turn)
             used += len(turn)
 
@@ -139,10 +148,6 @@ def _contains_tool_call(content: Any) -> bool:
     items = content if isinstance(content, list) else [content]
 
     for item in items:
-        # Our ToolCall dataclass has ``name`` and ``arguments`` but no
-        # ``role`` attribute. Message has ``role``. This is a
-        # lightweight duck-typing check that avoids importing
-        # ``ToolCall`` here (avoids a circular import).
         if hasattr(item, "name") and hasattr(item, "arguments"):
             return True
 

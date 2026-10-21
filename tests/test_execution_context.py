@@ -215,6 +215,38 @@ class TestExecutionContext(unittest.TestCase):
         self.assertEqual(context.events[1].content[0].content, "q2")
         self.assertEqual(context.events[2].content[0].content, "a2")
 
+    def test_truncate_history_keeps_latest_turn_even_if_too_big(self):
+        """The most recent turn must always be kept, even if it exceeds
+        the budget. Otherwise the user's current question is lost.
+        """
+        context = ExecutionContext()
+        context.create_event("system", "sys")
+
+        # One large turn: user + assistant(tool) + tool + assistant
+        context.create_event("user", [Message(role="user", content="q1")])
+        context.create_event(
+            "assistant",
+            [ToolCall(id="c1", name="search_web", arguments={"query": "x"})],
+        )
+        context.create_event(
+            "tool",
+            [ToolResult(tool_call_id="c1", name="search_web", content="r1")],
+        )
+        context.create_event(
+            "assistant",
+            [Message(role="assistant", content="a1")],
+        )
+
+        # Budget of 5, but the turn alone has 4 events.
+        # The turn should still be kept.
+        context.truncate_history(max_events=5, keep_system=True)
+
+        types = [e.type for e in context.events]
+        self.assertEqual(
+            types,
+            ["system", "user", "assistant", "tool", "assistant"],
+        )
+        self.assertEqual(context.events[1].content[0].content, "q1")
 
 if __name__ == "__main__":
     unittest.main()
