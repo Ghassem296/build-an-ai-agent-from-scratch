@@ -225,13 +225,14 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         final_request = self.llm_client.complete.await_args_list[1].args[0]
         self.assertEqual(final_request.tools, [])
 
-        system_messages = [
-            message
-            for message in final_request.messages
-            if isinstance(message, Message) and message.role == "system"
-        ]
-        self.assertTrue(system_messages)
-        self.assertIn("step limit has been reached", system_messages[-1].content)
+        # The step-limit message is the very first message in the
+        # final request (prepended, not stored in the persistent context).
+        self.assertIsInstance(final_request.messages[0], Message)
+        self.assertEqual(final_request.messages[0].role, "system")
+        self.assertIn(
+            "step limit has been reached",
+            final_request.messages[0].content,
+        )
 
     async def test_run_uses_fallback_if_final_answer_is_empty(self):
         self.llm_client.complete.side_effect = [
@@ -421,13 +422,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.llm_client.complete.assert_not_awaited()
 
     async def test_agent_truncates_long_history(self):
-        """When max_history_events is small, the Agent must trim the
-        event history before sending it to the LLM.
-
-        The most recent turn is always kept, even if it exceeds the
-        budget. So the final request may contain more than
-        ``max_history_events`` messages when the last turn is large.
-        """
         agent = Agent(
             llm_client=self.llm_client,
             mcp_session=self.mcp_session,
@@ -472,13 +466,8 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(answer, "Final answer.")
 
         final_request = self.llm_client.complete.await_args_list[-1].args[0]
-
-        # The most recent turn is always kept, so the final request
-        # may contain more than max_history_events messages when the
-        # last turn is large.
         self.assertGreaterEqual(len(final_request.messages), 1)
 
-        # The system prompt must be present.
         system_msgs = [
             m
             for m in final_request.messages
@@ -487,9 +476,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(system_msgs)
 
     async def test_final_answer_llm_error_is_hidden_from_user(self):
-        """When the LLM fails during the final-answer step, the user
-        must receive a generic message rather than the raw exception.
-        """
         self.llm_client.complete.side_effect = [
             LlmResponse(
                 content=[

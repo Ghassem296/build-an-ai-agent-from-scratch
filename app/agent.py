@@ -76,7 +76,7 @@ class Agent:
 
         for event in context.get_events():
             if event.type == "system":
-                return  # already seeded
+                return
 
         context.create_event(
             "system",
@@ -192,7 +192,6 @@ class Agent:
         tools: list[dict[str, Any]] | None = None,
     ) -> LlmRequest:
         """Build an LLM request from the event history."""
-
         context.truncate_history(
             max_events=self.max_history_events,
             keep_system=True,
@@ -405,22 +404,27 @@ class Agent:
         self,
         context: ExecutionContext,
     ) -> str:
-        """Request a final response without allowing additional tool calls."""
-        context.create_event(
-            "system",
-            [
-                Message(
-                    role="system",
-                    content=(
-                        "The tool-use step limit has been reached. "
-                        "Answer the user using the information already "
-                        "available. Do not request or call more tools."
-                    ),
-                )
-            ],
-        )
+        """Request a final response without allowing additional tool calls.
 
+        The step-limit message is added ONLY to this request, not to
+        the persistent context. This prevents the message from leaking
+        into future turns in interactive mode.
+        """
         request = self._prepare_llm_request(context, tools=[])
+
+        # Prepend a one-shot system message that is NOT stored in
+        # the persistent context.
+        request.messages = [
+            Message(
+                role="system",
+                content=(
+                    "The tool-use step limit has been reached. "
+                    "Answer the user using the information already "
+                    "available. Do not request or call more tools."
+                ),
+            ),
+            *request.messages,
+        ]
 
         try:
             response = await self.think(request)
