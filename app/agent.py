@@ -90,47 +90,19 @@ class Agent:
                 max_steps,
             )
 
-            request = self._prepare_llm_request(
+            response = await self.step(
                 context,
                 tools=tool_definitions,
             )
 
-            response = await self.think(request)
-            context.create_event("assistant", response.content)
-
-            tool_calls = [
-                item
-                for item in response.content
-                if isinstance(item, ToolCall)
-            ]
-
-            if not tool_calls:
+            # If the step produced no tool calls, the LLM returned a
+            # final answer and we can stop the loop.
+            if not self._has_tool_calls(response):
                 logger.info(
                     "Execution %s finished without further tool calls",
                     context.execution_id,
                 )
                 return self._store_final_result(response.content)
-
-            # Execute calls sequentially to keep behavior predictable.
-            tool_results: list[ToolResult] = []
-
-            for tool_call in tool_calls:
-                logger.info(
-                    "LLM requested MCP tool: %s; arguments=%s",
-                    tool_call.name,
-                    tool_call.arguments,
-                )
-
-                result = await self._execute_tool(tool_call)
-                tool_results.append(result)
-
-                logger.info(
-                    "MCP tool %s completed; is_error=%s",
-                    result.name,
-                    result.is_error,
-                )
-
-            context.create_event("tool", tool_results)
 
         logger.warning(
             "Execution %s reached max_steps=%d",
@@ -216,6 +188,67 @@ class Agent:
         in one place without touching the main loop.
         """
         return await self.llm_client.complete(request)
+
+    async def step(
+        self,
+        context: ExecutionContext,
+        *,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LlmResponse:
+        """Perform one think-act cycle.
+
+        - Build the LLM request from the current context.
+        - Ask the LLM (via ``think()``) what to do next.
+        - If the LLM requested tool calls, execute them (via
+          ``_execute_tool()``) and record the results in the context.
+
+        Returns the ``LlmResponse`` so the caller can decide whether
+        the loop should continue or stop.
+        """
+        request = self._prepare_llm_request(context, tools=tools)
+
+        response = await self.think(request)
+        context.create_event("assistant", response.content)
+
+        tool_calls = [
+            item
+            for item in response.content
+            if isinstance(item, ToolCall)
+        ]
+
+        if not tool_calls:
+            return response
+
+        # Execute calls sequentially to keep behavior predictable.
+        tool_results: list[ToolResult] = []
+
+        for tool_call in tool_calls:
+            logger.info(
+                "LLM requested MCP tool: %s; arguments=%s",
+                tool_call.name,
+                tool_call.arguments,
+            )
+
+            result = await self._execute_tool(tool_call)
+            tool_results.append(result)
+
+            logger.info(
+                "MCP tool %s completed; is_error=%s",
+                result.name,
+                result.is_error,
+            )
+
+        context.create_event("tool", tool_results)
+
+        return response
+
+    @staticmethod
+    def _has_tool_calls(response: LlmResponse) -> bool:
+        """Return True if the response contains at least one ToolCall."""
+        return any(
+            isinstance(item, ToolCall)
+            for item in response.content
+        )
 
     async def _execute_tool(self, tool_call: ToolCall) -> ToolResult:
         """Execute one MCP tool call and normalize its result."""
