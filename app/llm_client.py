@@ -12,19 +12,31 @@ from litellm import acompletion
 
 logger = logging.getLogger(__name__)
 
-litellm.register_model(
-    {
-        "openai/gemini-2.5-flash": {
-            "max_tokens": 8192,
-            "max_input_tokens": 1048576,
-            "max_output_tokens": 8192,
-            "input_cost_per_token": 0,
-            "output_cost_per_token": 0,
-            "litellm_provider": "openai",
-            "mode": "chat",
-        }
-    }
-)
+
+_DEFAULT_MODEL_METADATA: dict[str, Any] = {
+    "max_tokens": 8192,
+    "max_input_tokens": 1048576,
+    "max_output_tokens": 8192,
+    "input_cost_per_token": 0,
+    "output_cost_per_token": 0,
+    "litellm_provider": "openai",
+    "mode": "chat",
+}
+
+
+def _register_model(model: str) -> None:
+    """Register a model with LiteLLM if it isn't already known.
+
+    This is a no-op for models LiteLLM already knows about.
+    """
+    try:
+        litellm.get_model_info(model)
+        return
+    except Exception:
+        pass
+
+    litellm.register_model({model: _DEFAULT_MODEL_METADATA})
+    logger.debug("Registered unknown model %s with default metadata", model)
 
 
 @dataclass(slots=True)
@@ -81,6 +93,8 @@ class LlmClient:
 
         if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
+
+        _register_model(model)
 
         self.model = model
         self.api_key = (
@@ -142,11 +156,7 @@ class LlmClient:
         return self._parse_response(response)
 
     @staticmethod
-    def _serialize_tool_call(
-        item: ToolCall,
-    ) -> dict[str, Any]:
-        """Convert a normalized tool call to API format."""
-
+    def _serialize_tool_call(item: ToolCall) -> dict[str, Any]:
         return {
             "id": item.id,
             "type": "function",
@@ -160,8 +170,6 @@ class LlmClient:
     def _build_messages(
         items: list[Message | ToolCall | ToolResult],
     ) -> list[dict[str, Any]]:
-        """Convert normalized conversation items to API messages."""
-
         messages: list[dict[str, Any]] = []
         open_assistant: dict[str, Any] | None = None
 
@@ -231,8 +239,6 @@ class LlmClient:
 
     @staticmethod
     def _parse_response(response: Any) -> LlmResponse:
-        """Convert a LiteLLM response to normalized objects."""
-
         choices = (
             response.get("choices", [])
             if isinstance(response, dict)
@@ -281,9 +287,6 @@ class LlmClient:
                 name = getattr(function, "name", "")
                 raw_arguments = getattr(function, "arguments", "{}")
 
-            # Issue #5: some gateways (notably Gemini via the
-            # OpenAI-compatible API) return empty or missing ids.
-            # Generate a fallback so tool_call_id matching still works.
             if not call_id:
                 call_id = f"call_{uuid.uuid4().hex}"
                 logger.warning(
@@ -292,8 +295,6 @@ class LlmClient:
                     call_id,
                 )
 
-            # Issue #4: invalid JSON arguments must not crash the
-            # whole run. Pass an empty dict and let the model retry.
             if isinstance(raw_arguments, dict):
                 arguments = raw_arguments
             elif isinstance(raw_arguments, str):
@@ -325,11 +326,7 @@ class LlmClient:
                 arguments = {}
 
             content.append(
-                ToolCall(
-                    id=call_id,
-                    name=name,
-                    arguments=arguments,
-                )
+                ToolCall(id=call_id, name=name, arguments=arguments)
             )
 
         if not content:
