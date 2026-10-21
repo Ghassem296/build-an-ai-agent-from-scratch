@@ -1,12 +1,19 @@
+"""Legacy single-file agent loop demo.
 
-import os
-import json
+This module predates the object-oriented Agent in ``app/`` and is kept
+as a reference / educational example. It is NOT used by the main
+application and should not be imported by production code.
+"""
+
 import inspect
+import json
+import logging
+import os
 import traceback
 
+from ddgs import DDGS
 from dotenv import load_dotenv
 from litellm import completion
-from ddgs import DDGS
 
 
 # ==================================================
@@ -14,6 +21,12 @@ from ddgs import DDGS
 # ==================================================
 
 load_dotenv()
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 MODEL_NAME = "openai/gemini-2.5-flash"
 API_BASE = "https://1xai.ir/v1"
@@ -47,11 +60,8 @@ def search_web(
         ]
 
     except Exception as e:
-        return [
-            {
-                "error": f"Web search failed: {e}"
-            }
-        ]
+        logger.exception("Web search failed")
+        return [{"error": f"Web search failed: {e}"}]
 
 
 # ==================================================
@@ -132,14 +142,13 @@ def tool_execution(tool_box, tool_call):
             f"Unknown tool requested: {function_name}"
         )
 
-    print(f"[DEBUG] Executing tool: {function_name}")
-    print(f"[DEBUG] Arguments: {function_args}")
-
-    tool_result = tool_box[function_name](
-        **function_args
+    logger.debug(
+        "Executing tool %s with arguments %s",
+        function_name,
+        function_args,
     )
 
-    return tool_result
+    return tool_box[function_name](**function_args)
 
 
 # ==================================================
@@ -187,9 +196,7 @@ def simple_agent_loop(
     ]
 
     for step in range(max_steps):
-        print(
-            f"\n[DEBUG] Agent step: {step + 1}/{max_steps}"
-        )
+        logger.debug("Agent step: %d/%d", step + 1, max_steps)
 
         response = completion(
             model=MODEL_NAME,
@@ -203,21 +210,13 @@ def simple_agent_loop(
         tool_calls = assistant_message.tool_calls or []
 
         if not tool_calls:
-            print("\n[DEBUG] No tool call was returned.")
-
-            print(
-                "[DEBUG] Finish reason:",
+            logger.debug(
+                "No tool call was returned (finish_reason=%s).",
                 response.choices[0].finish_reason,
             )
-
-            print(
-                "[DEBUG] Assistant response:",
-                repr(assistant_message.content),
-            )
-
             return assistant_message.content or ""
 
-        print("\n[DEBUG] The model requested a tool.")
+        logger.debug("The model requested a tool.")
 
         messages.append(assistant_message)
 
@@ -229,13 +228,8 @@ def simple_agent_loop(
                 )
 
             except Exception as e:
-                print(
-                    f"[DEBUG] Tool execution failed: {e}"
-                )
-
-                tool_result = {
-                    "error": str(e)
-                }
+                logger.exception("Tool execution failed")
+                tool_result = {"error": str(e)}
 
             messages.append({
                 "role": "tool",
@@ -248,9 +242,7 @@ def simple_agent_loop(
             })
 
     # The step limit has been reached.
-    print(
-        f"\n[DEBUG] Maximum step limit reached: {max_steps}"
-    )
+    logger.warning("Maximum step limit reached: %d", max_steps)
 
     messages.append({
         "role": "system",
@@ -277,19 +269,26 @@ def simple_agent_loop(
         final_message = final_response.choices[0].message
         final_content = final_message.content or ""
 
-        print("\n[DEBUG] Forced final response received.")
+        # Defensive: even with tool_choice="none", some models may
+        # still emit tool calls. Ignore them and use only the text.
+        if getattr(final_message, "tool_calls", None):
+            logger.warning(
+                "Model returned tool calls despite tool_choice='none'; "
+                "ignoring them."
+            )
 
+        logger.debug("Forced final response received.")
         return final_content
 
-    except Exception as e:
-        print(
-            f"[ERROR] Failed to generate final response: {e}"
-        )
+    except Exception:
+        logger.exception("Failed to generate final response")
 
+        # Do not leak the raw exception (which may contain API keys,
+        # internal URLs, etc.) to the end user.
         return (
             "The agent reached its maximum step limit, "
             "but the final response could not be generated. "
-            f"Error: {e}"
+            "Please try again later."
         )
 
 

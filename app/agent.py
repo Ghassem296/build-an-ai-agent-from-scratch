@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -28,13 +27,18 @@ class Agent:
         mcp_session: Any,
         *,
         tool_timeout: float = 30.0,
+        max_history_events: int = 40,
     ) -> None:
         if tool_timeout <= 0:
             raise ValueError("tool_timeout must be greater than zero")
 
+        if max_history_events < 1:
+            raise ValueError("max_history_events must be at least 1")
+
         self.llm_client = llm_client
         self.mcp_session = mcp_session
         self.tool_timeout = tool_timeout
+        self.max_history_events = max_history_events
 
         # This is only a reference to the most recently started execution.
         # Each run() keeps and uses its own local context.
@@ -176,6 +180,14 @@ class Agent:
         tools: list[dict[str, Any]] | None = None,
     ) -> LlmRequest:
         """Build an LLM request from the event history."""
+
+        # Trim the history before sending it to the model so we do
+        # not exceed the context window during long tool-use loops.
+        context.truncate_history(
+            max_events=self.max_history_events,
+            keep_system=True,
+        )
+
         messages: list[Message | ToolCall | ToolResult] = []
 
         for event in context.get_events():
@@ -315,7 +327,23 @@ class Agent:
         )
 
         request = self._prepare_llm_request(context, tools=[])
-        response = await self.llm_client.complete(request)
+
+        try:
+            response = await self.llm_client.complete(request)
+        except asyncio.CancelledError:
+            # Cancellation must always propagate so the caller can
+            # shut down cleanly.
+            raise
+        except Exception:
+            logger.exception(
+                "Execution %s: failed to generate final answer",
+                context.execution_id,
+            )
+            return (
+                "The maximum number of tool-use steps was reached, "
+                "and a final answer could not be generated. "
+                "Please try again later."
+            )
 
         context.create_event("assistant", response.content)
 

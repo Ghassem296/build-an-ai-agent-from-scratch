@@ -1,0 +1,1 @@
+"""Example scripts and legacy demos for the MCP agent project."""

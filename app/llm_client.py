@@ -6,24 +6,34 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import litellm
 from litellm import acompletion
 
-
 logger = logging.getLogger(__name__)
+
+litellm.register_model(
+    {
+        "openai/gemini-2.5-flash": {
+            "max_tokens": 8192,
+            "max_input_tokens": 1048576,
+            "max_output_tokens": 8192,
+            "input_cost_per_token": 0,
+            "output_cost_per_token": 0,
+            "litellm_provider": "openai",
+            "mode": "chat",
+        }
+    }
+)
 
 
 @dataclass(slots=True)
 class Message:
-    """A message in the conversation."""
-
     role: str
     content: str | None = None
 
 
 @dataclass(slots=True)
 class ToolCall:
-    """A tool call requested by the language model."""
-
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
@@ -31,8 +41,6 @@ class ToolCall:
 
 @dataclass(slots=True)
 class ToolResult:
-    """The result of executing a tool."""
-
     tool_call_id: str
     name: str
     content: str
@@ -41,8 +49,6 @@ class ToolResult:
 
 @dataclass(slots=True)
 class LlmRequest:
-    """Input data for an LLM request."""
-
     messages: list[Message | ToolCall | ToolResult]
     tools: list[dict[str, Any]] | None = None
     temperature: float | None = None
@@ -50,54 +56,46 @@ class LlmRequest:
 
 @dataclass(slots=True)
 class LlmResponse:
-    """Normalized response from the language model."""
-
-    content: list[Message | ToolCall]
+    content: list[Message | ToolCall | ToolResult]
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 class LlmClient:
-    """Asynchronous LLM client powered by LiteLLM."""
-
     def __init__(
         self,
-        model: str | None = None,
+        model: str = "openai/gemini-2.5-flash",
         api_key: str | None = None,
         api_base: str | None = None,
-        *,
-        tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.0,
         timeout: float = 60.0,
+        tools: list[dict[str, Any]] | None = None,
+        max_retries: int = 2,              # ← NEW
     ) -> None:
-        self.model = (
-            model
-            or os.getenv("LLM_MODEL")
-            or "openai/gemini-2.5-flash"
-        )
+        if not 0.0 <= temperature <= 2.0:
+            raise ValueError("temperature must be between 0 and 2")
 
+        if timeout <= 0:
+            raise ValueError("timeout must be greater than 0")
+
+        if max_retries < 0:                 # ← NEW
+            raise ValueError("max_retries cannot be negative")
+
+        self.model = model
         self.api_key = (
             api_key
             or os.getenv("LLM_API_KEY")
             or os.getenv("XAI_1_API_KEY")
         )
-
         self.api_base = (
             api_base
             or os.getenv("LLM_API_BASE")
             or os.getenv("OPENAI_API_BASE")
         )
-
-        if not self.model.strip():
-            raise ValueError("model cannot be empty")
-
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than zero")
-
-        if not 0.0 <= temperature <= 2.0:
-            raise ValueError("temperature must be between 0 and 2")
-
-        self.tools = list(tools or [])
         self.temperature = temperature
         self.timeout = timeout
+        self.tools = tools or []
+        self.max_retries = max_retries      # ← NEW
 
     async def complete(self, request: LlmRequest) -> LlmResponse:
         """Send a conversation to the model and normalize its response."""
@@ -119,6 +117,7 @@ class LlmClient:
             "messages": self._build_messages(request.messages),
             "temperature": temperature,
             "timeout": self.timeout,
+            "num_retries": self.max_retries,    # ← NEW
         }
 
         if self.api_key:
@@ -127,8 +126,6 @@ class LlmClient:
         if self.api_base:
             payload["api_base"] = self.api_base
 
-        # None means use the client's default tools.
-        # An empty list explicitly disables tools for this request.
         tool_definitions = (
             self.tools if request.tools is None else request.tools
         )
@@ -145,19 +142,16 @@ class LlmClient:
 
     @staticmethod
     def _serialize_tool_call(
-        tool_call: ToolCall,
+        item: ToolCall,
     ) -> dict[str, Any]:
-        """Serialize a tool call into the OpenAI-compatible format."""
+        """Convert a normalized tool call to API format."""
 
         return {
-            "id": tool_call.id,
+            "id": item.id,
             "type": "function",
             "function": {
-                "name": tool_call.name,
-                "arguments": json.dumps(
-                    tool_call.arguments,
-                    ensure_ascii=False,
-                ),
+                "name": item.name,
+                "arguments": json.dumps(item.arguments),
             },
         }
 
@@ -165,9 +159,28 @@ class LlmClient:
     def _build_messages(
         items: list[Message | ToolCall | ToolResult],
     ) -> list[dict[str, Any]]:
-        """Convert normalized conversation items to API messages."""
+        """Convert normalized conversation items to API messages.
+
+        Invariant
+        ---------
+        A ``ToolCall`` is only valid inside an assistant message that
+        belongs to the *current* assistant turn. A turn ends as soon as
+        either:
+
+        * a ``ToolResult`` for that turn is appended, or
+        * a non-assistant message (user/system) is appended.
+
+        Any ``ToolCall`` that arrives after the current turn has ended
+        starts a brand new assistant message with ``content=None``.
+        Consecutive tool calls within the same turn are grouped onto
+        the same assistant message.
+        """
 
         messages: list[dict[str, Any]] = []
+
+        # The assistant message that is still accepting tool calls,
+        # or ``None`` if the current turn has been closed.
+        open_assistant: dict[str, Any] | None = None
 
         for item in items:
             if isinstance(item, Message):
@@ -176,32 +189,39 @@ class LlmClient:
                         "Tool results must use the ToolResult class"
                     )
 
-                messages.append(
-                    {
-                        "role": item.role,
-                        "content": item.content,
-                    }
-                )
+                api_message: dict[str, Any] = {
+                    "role": item.role,
+                    "content": item.content,
+                }
+
+                messages.append(api_message)
+
+                if item.role == "assistant":
+                    open_assistant = api_message
+                else:
+                    open_assistant = None
 
             elif isinstance(item, ToolCall):
                 serialized_call = LlmClient._serialize_tool_call(item)
 
-                # Merge consecutive tool calls into the same assistant
-                # message when possible.
                 if (
-                    messages
-                    and messages[-1].get("role") == "assistant"
-                    and messages[-1].get("tool_calls") is not None
+                    open_assistant is not None
+                    and open_assistant.get("tool_calls") is None
                 ):
-                    messages[-1]["tool_calls"].append(serialized_call)
+                    open_assistant["tool_calls"] = [serialized_call]
+                elif (
+                    open_assistant is not None
+                    and open_assistant.get("tool_calls") is not None
+                ):
+                    open_assistant["tool_calls"].append(serialized_call)
                 else:
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [serialized_call],
-                        }
-                    )
+                    new_message: dict[str, Any] = {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [serialized_call],
+                    }
+                    messages.append(new_message)
+                    open_assistant = new_message
 
             elif isinstance(item, ToolResult):
                 messages.append(
@@ -217,71 +237,134 @@ class LlmClient:
                     }
                 )
 
+                open_assistant = None
+
             else:
                 raise TypeError(
-                    "Unsupported conversation item: "
-                    f"{type(item).__name__}"
+                    f"Unsupported message item: {type(item).__name__}"
                 )
 
         return messages
 
     @staticmethod
     def _parse_response(response: Any) -> LlmResponse:
-        """Parse a LiteLLM response into Message and ToolCall objects."""
+        """Convert a LiteLLM response to normalized objects."""
 
-        choices = getattr(response, "choices", None)
+        choices = (
+            response.get("choices", [])
+            if isinstance(response, dict)
+            else getattr(response, "choices", [])
+        )
 
         if not choices:
-            raise ValueError("LiteLLM returned no choices")
+            raise ValueError("The model returned no choices")
 
-        message = choices[0].message
-        content: list[Message | ToolCall] = []
+        choice = choices[0]
+        message = (
+            choice.get("message", {})
+            if isinstance(choice, dict)
+            else getattr(choice, "message", None)
+        )
 
-        text_content = getattr(message, "content", None)
+        if message is None:
+            raise ValueError("The model response has no assistant message")
+
+        if isinstance(message, dict):
+            text_content = message.get("content")
+            raw_tool_calls = message.get("tool_calls") or []
+        else:
+            text_content = getattr(message, "content", None)
+            raw_tool_calls = getattr(message, "tool_calls", None) or []
+
+        content: list[Message | ToolCall | ToolResult] = []
 
         if text_content:
             content.append(
-                Message(
-                    role="assistant",
-                    content=text_content,
-                )
+                Message(role="assistant", content=text_content)
             )
 
-        for raw_call in getattr(message, "tool_calls", None) or []:
-            function = raw_call.function
-            raw_arguments = getattr(function, "arguments", None) or "{}"
+        for raw_call in raw_tool_calls:
+            if isinstance(raw_call, dict):
+                call_id = raw_call.get("id", "")
+                function = raw_call.get("function", {})
+            else:
+                call_id = getattr(raw_call, "id", "")
+                function = getattr(raw_call, "function", None)
 
-            try:
-                if isinstance(raw_arguments, str):
-                    arguments = json.loads(raw_arguments)
-                else:
-                    arguments = raw_arguments
-            except (json.JSONDecodeError, TypeError) as exc:
-                raise ValueError(
-                    f"Invalid JSON arguments for tool "
-                    f"{function.name!r}: {raw_arguments!r}"
-                ) from exc
+            if isinstance(function, dict):
+                name = function.get("name", "")
+                raw_arguments = function.get("arguments", "{}")
+            else:
+                name = getattr(function, "name", "")
+                raw_arguments = getattr(function, "arguments", "{}")
 
-            if not isinstance(arguments, dict):
+            if isinstance(raw_arguments, dict):
+                arguments = raw_arguments
+            elif isinstance(raw_arguments, str):
+                try:
+                    parsed_arguments = json.loads(raw_arguments or "{}")
+                except json.JSONDecodeError as exc:
+                    raise ValueError(
+                        f"Invalid JSON arguments for tool {name!r}"
+                    ) from exc
+
+                if not isinstance(parsed_arguments, dict):
+                    raise ValueError(
+                        f"Arguments for tool {name!r} must be a JSON object"
+                    )
+
+                arguments = parsed_arguments
+            else:
                 raise ValueError(
-                    f"Arguments for tool {function.name!r} "
-                    "must be a JSON object"
+                    f"Invalid arguments for tool {name!r}"
                 )
 
             content.append(
                 ToolCall(
-                    id=raw_call.id,
-                    name=function.name,
+                    id=call_id,
+                    name=name,
                     arguments=arguments,
                 )
             )
 
         if not content:
-            content.append(
-                Message(
-                    role="assistant",
-                    content="",
+            content.append(Message(role="assistant", content=""))
+
+        usage = (
+            response.get("usage", {})
+            if isinstance(response, dict)
+            else getattr(response, "usage", None)
+        )
+
+        if usage is None:
+            input_tokens = 0
+            output_tokens = 0
+        elif isinstance(usage, dict):
+            input_tokens = (
+                usage.get("prompt_tokens", usage.get("input_tokens", 0))
+                or 0
+            )
+            output_tokens = (
+                usage.get(
+                    "completion_tokens",
+                    usage.get("output_tokens", 0),
                 )
+                or 0
+            )
+        else:
+            input_tokens = (
+                getattr(usage, "prompt_tokens", None)
+                or getattr(usage, "input_tokens", 0)
+                or 0
+            )
+            output_tokens = (
+                getattr(usage, "completion_tokens", None)
+                or getattr(usage, "output_tokens", 0)
+                or 0
             )
 
-        return LlmResponse(content=content)
+        return LlmResponse(
+            content=content,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )

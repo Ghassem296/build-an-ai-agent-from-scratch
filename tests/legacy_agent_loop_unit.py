@@ -1,10 +1,9 @@
-
 import os
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from tests.test_agent_loop import simple_agent_loop
+from examples.legacy_agent_demo import simple_agent_loop
 
 
 def make_tool_response(call_id):
@@ -53,8 +52,8 @@ def make_final_response():
 
 class TestAgentLoop(unittest.TestCase):
 
-    @patch("test_agent_loop.tool_execution")
-    @patch("test_agent_loop.completion")
+    @patch("examples.legacy_agent_demo.tool_execution")
+    @patch("examples.legacy_agent_demo.completion")
     def test_agent_stops_repeated_tool_calls(
         self,
         mock_completion,
@@ -104,10 +103,8 @@ class TestAgentLoop(unittest.TestCase):
             "none",
         )
 
-
-
-    @patch("test_agent_loop.tool_execution")
-    @patch("test_agent_loop.completion")
+    @patch("examples.legacy_agent_demo.tool_execution")
+    @patch("examples.legacy_agent_demo.completion")
     def test_forced_final_response_does_not_execute_more_tools(
         self,
         mock_completion,
@@ -152,9 +149,8 @@ class TestAgentLoop(unittest.TestCase):
             "none",
         )
 
-
-    @patch("test_agent_loop.tool_execution")
-    @patch("test_agent_loop.completion")
+    @patch("examples.legacy_agent_demo.tool_execution")
+    @patch("examples.legacy_agent_demo.completion")
     def test_agent_handles_final_api_error(
         self,
         mock_completion,
@@ -180,12 +176,15 @@ class TestAgentLoop(unittest.TestCase):
                 max_steps=2,
             )
 
+        # The user-facing message no longer leaks the raw exception,
+        # but it should still indicate that the final answer failed.
         self.assertIn(
             "final response could not be generated",
             result,
         )
 
-        self.assertIn(
+        # The raw error text must NOT appear in the user-facing output.
+        self.assertNotIn(
             "Simulated final API failure",
             result,
         )
@@ -199,7 +198,6 @@ class TestAgentLoop(unittest.TestCase):
             mock_completion.call_count,
             3,
         )
-
 
 
 if __name__ == "__main__":

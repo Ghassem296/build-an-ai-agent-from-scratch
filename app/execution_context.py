@@ -52,5 +52,55 @@ class ExecutionContext:
     def clear(self) -> None:
         self.events.clear()
 
+    def truncate_history(
+        self,
+        max_events: int,
+        keep_system: bool = True,
+    ) -> None:
+        """Trim the oldest events while preserving the system prompt.
+
+        Keeps the most recent ``max_events`` events. If ``keep_system``
+        is True, the leading system events (if any) are retained even
+        when they fall outside the window.
+
+        This prevents the conversation from exceeding the model's
+        context window during long multi-step tool-use sessions.
+        """
+
+        if max_events < 1:
+            raise ValueError("max_events must be at least 1")
+
+        if len(self.events) <= max_events:
+            return
+
+        # Preserve every system event (they hold the agent instructions).
+        if keep_system:
+            system_events = [
+                event
+                for event in self.events
+                if event.type == "system"
+            ]
+        else:
+            system_events = []
+
+        # The rest of the budget goes to the newest non-system events.
+        non_system_events = [
+            event
+            for event in self.events
+            if not (keep_system and event.type == "system")
+        ]
+
+        remaining = max(1, max_events - len(system_events))
+        kept_non_system = non_system_events[-remaining:]
+
+        # Rebuild the list preserving the original order.
+        kept_ids = {id(e) for e in system_events} | {
+            id(e) for e in kept_non_system
+        }
+
+        self.events = [
+            event for event in self.events if id(event) in kept_ids
+        ]
+
     def __len__(self) -> int:
         return len(self.events)

@@ -417,5 +417,117 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.llm_client.complete.assert_not_awaited()
 
 
+    async def test_final_answer_llm_error_is_hidden_from_user(self):
+        """When the LLM fails during the final-answer step, the user
+        must receive a generic message rather than the raw exception.
+        """
+
+        self.llm_client.complete.side_effect = [
+            # First call: request a tool so we reach max_steps quickly.
+            LlmResponse(
+                content=[
+                    ToolCall(
+                        id="call-1",
+                        name="search_web",
+                        arguments={"query": "MCP"},
+                    )
+                ]
+            ),
+            # Second call (final answer): raise an API error.
+            RuntimeError("Simulated final API failure"),
+        ]
+
+        answer = await self.agent.run(
+            "Search for MCP",
+            max_steps=1,
+        )
+
+        # The generic message must be returned.
+        self.assertIn(
+            "a final answer could not be generated",
+            answer,
+        )
+        self.assertIn(
+            "Please try again later",
+            answer,
+        )
+
+        # The raw exception text must NOT leak to the user.
+        self.assertNotIn(
+            "Simulated final API failure",
+            answer,
+        )
+
+        # The tool must have been executed once before the failure.
+        self.assertEqual(self.mcp_session.call_tool.await_count, 1)
+
+    async def test_agent_truncates_long_history(self):
+        """When max_history_events is small, the Agent must trim the
+        event history before sending it to the LLM.
+        """
+
+        # Create an Agent with a very small history window.
+        agent = Agent(
+            llm_client=self.llm_client,
+            mcp_session=self.mcp_session,
+            tool_timeout=1.0,
+            max_history_events=3,
+        )
+
+        # First call: request a tool.
+        # Second call: request another tool.
+        # Third call: final answer.
+        self.llm_client.complete.side_effect = [
+            LlmResponse(
+                content=[
+                    ToolCall(
+                        id="call-1",
+                        name="search_web",
+                        arguments={"query": "first"},
+                    )
+                ]
+            ),
+            LlmResponse(
+                content=[
+                    ToolCall(
+                        id="call-2",
+                        name="search_web",
+                        arguments={"query": "second"},
+                    )
+                ]
+            ),
+            LlmResponse(
+                content=[
+                    Message(
+                        role="assistant",
+                        content="Final answer.",
+                    )
+                ]
+            ),
+        ]
+
+        answer = await agent.run(
+            "Search twice",
+            max_steps=2,
+        )
+
+        self.assertEqual(answer, "Final answer.")
+
+        # The final request must not exceed max_history_events.
+        final_request = self.llm_client.complete.await_args_list[-1].args[0]
+        self.assertLessEqual(
+            len(final_request.messages),
+            3,
+        )
+    async def test_constructor_rejects_invalid_max_history_events(self):
+        with self.assertRaises(ValueError):
+            Agent(
+                llm_client=self.llm_client,
+                mcp_session=self.mcp_session,
+                tool_timeout=1.0,
+                max_history_events=0,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
