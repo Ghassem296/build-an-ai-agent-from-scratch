@@ -13,6 +13,7 @@ from mcp.client.stdio import stdio_client
 
 from app.agent import Agent
 from app.config import settings
+from app.execution_context import ExecutionContext
 from app.llm_client import LlmClient
 
 
@@ -156,6 +157,9 @@ async def interactive_loop() -> None:
             tool_timeout=settings.tool_timeout,
         )
 
+        # One ExecutionContext for the whole session.
+        session_context = ExecutionContext()
+
         while True:
             try:
                 prompt = input("\nYou: ").strip()
@@ -173,6 +177,7 @@ async def interactive_loop() -> None:
                 answer = await agent.run(
                     prompt,
                     max_steps=settings.agent_max_steps,
+                    context=session_context,
                 )
                 print(f"\nAssistant: {answer}")
             except asyncio.CancelledError:

@@ -61,15 +61,31 @@ class Agent:
             else DEFAULT_SYSTEM_PROMPT
         )
 
-        # This is only a reference to the most recently started execution.
-        # Each run() keeps and uses its own local context.
         self.context: ExecutionContext | None = None
+
+    def seed_system_prompt(self, context: ExecutionContext) -> None:
+        """Add the system prompt to a context if not already present.
+
+        Idempotent: calling twice does not duplicate the event.
+        """
+        if not self.system_prompt:
+            return
+
+        for event in context.get_events():
+            if event.type == "system":
+                return  # already seeded
+
+        context.create_event(
+            "system",
+            [Message(role="system", content=self.system_prompt)],
+        )
 
     async def run(
         self,
         prompt: str,
         *,
         max_steps: int = 10,
+        context: ExecutionContext | None = None,
     ) -> str:
         """Run the agent loop and return the final answer."""
         if not prompt or not prompt.strip():
@@ -78,16 +94,11 @@ class Agent:
         if max_steps < 1:
             raise ValueError("max_steps must be at least 1")
 
-        context = ExecutionContext(execution_id=str(uuid4()))
-        self.context = context
+        if context is None:
+            context = ExecutionContext(execution_id=str(uuid4()))
+            self.context = context
 
-        # Seed the conversation with a system prompt so the model
-        # knows its role and the safety rules.
-        if self.system_prompt:
-            context.create_event(
-                "system",
-                [Message(role="system", content=self.system_prompt)],
-            )
+        self.seed_system_prompt(context)
 
         context.create_event(
             "user",
@@ -99,7 +110,6 @@ class Agent:
             context.execution_id,
         )
 
-        # Fetch the available MCP tools once for this execution.
         tool_definitions = await self._get_tool_definitions()
 
         logger.info(
@@ -123,8 +133,6 @@ class Agent:
                 tools=tool_definitions,
             )
 
-            # If the step produced no tool calls, the LLM returned a
-            # final answer and we can stop the loop.
             if not self._has_tool_calls(response):
                 logger.info(
                     "Execution %s finished without further tool calls",
@@ -182,8 +190,6 @@ class Agent:
     ) -> LlmRequest:
         """Build an LLM request from the event history."""
 
-        # Trim the history before sending it to the model so we do
-        # not exceed the context window during long tool-use loops.
         context.truncate_history(
             max_events=self.max_history_events,
             keep_system=True,
@@ -209,12 +215,7 @@ class Agent:
         )
 
     async def think(self, request: LlmRequest) -> LlmResponse:
-        """Send the request to the LLM and return its response.
-
-        This is a thin wrapper around ``llm_client.complete`` so that
-        future extensions (retries, callbacks, logging) can be added
-        in one place without touching the main loop.
-        """
+        """Send the request to the LLM and return its response."""
         return await self.llm_client.complete(request)
 
     async def step(
@@ -223,16 +224,7 @@ class Agent:
         *,
         tools: list[dict[str, Any]] | None = None,
     ) -> LlmResponse:
-        """Perform one think-act cycle.
-
-        - Build the LLM request from the current context.
-        - Ask the LLM (via ``think()``) what to do next.
-        - If the LLM requested tool calls, execute them (via
-          ``act()``) and record the results in the context.
-
-        Returns the ``LlmResponse`` so the caller can decide whether
-        the loop should continue or stop.
-        """
+        """Perform one think-act cycle."""
         request = self._prepare_llm_request(context, tools=tools)
 
         response = await self.think(request)
@@ -258,13 +250,7 @@ class Agent:
         context: ExecutionContext,
         tool_calls: list[ToolCall],
     ) -> list[ToolResult]:
-        """Execute the tool calls requested by the LLM.
-
-        Currently calls are executed sequentially so the behavior
-        stays predictable. This is the natural place to add
-        parallelism (``asyncio.gather``) or human-in-the-loop
-        approval later.
-        """
+        """Execute the tool calls requested by the LLM."""
         tool_results: list[ToolResult] = []
 
         for tool_call in tool_calls:
@@ -417,8 +403,6 @@ class Agent:
         try:
             response = await self.think(request)
         except asyncio.CancelledError:
-            # Cancellation must always propagate so the caller can
-            # shut down cleanly.
             raise
         except Exception:
             logger.exception(
