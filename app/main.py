@@ -33,10 +33,18 @@ def configure_logging() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    logging.getLogger("LiteLLM").setLevel(logging.DEBUG)
-    logging.getLogger("litellm").setLevel(logging.DEBUG)
-    logging.getLogger("openai").setLevel(logging.DEBUG)
-    logging.getLogger("httpx").setLevel(logging.INFO)
+    # Only enable noisy third-party DEBUG logs when the user
+    # explicitly asked for DEBUG via LOG_LEVEL.
+    if log_level == logging.DEBUG:
+        logging.getLogger("LiteLLM").setLevel(logging.DEBUG)
+        logging.getLogger("litellm").setLevel(logging.DEBUG)
+        logging.getLogger("openai").setLevel(logging.DEBUG)
+        logging.getLogger("httpx").setLevel(logging.INFO)
+    else:
+        logging.getLogger("LiteLLM").setLevel(logging.WARNING)
+        logging.getLogger("litellm").setLevel(logging.WARNING)
+        logging.getLogger("openai").setLevel(logging.WARNING)
+        logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 def build_mcp_environment() -> dict[str, str]:
@@ -159,6 +167,7 @@ async def interactive_loop() -> None:
 
         # One ExecutionContext for the whole session.
         session_context = ExecutionContext()
+        agent.seed_system_prompt(session_context)
 
         while True:
             try:
