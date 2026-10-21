@@ -57,14 +57,18 @@ class ExecutionContext:
         max_events: int,
         keep_system: bool = True,
     ) -> None:
-        """Trim the oldest events while preserving the system prompt.
+        """Trim the oldest events while preserving turn boundaries.
 
-        Keeps the most recent ``max_events`` events. If ``keep_system``
-        is True, the leading system events (if any) are retained even
-        when they fall outside the window.
+        A "turn" is a coherent group of events that the LLM API needs
+        together:
 
-        This prevents the conversation from exceeding the model's
-        context window during long multi-step tool-use sessions.
+            user
+            assistant (with or without tool_calls)
+            tool (only if the assistant requested tools)
+            assistant (final answer of the turn)
+
+        We cut only at turn boundaries so the truncated history is
+        still valid for the API.
         """
 
         if max_events < 1:
@@ -73,34 +77,73 @@ class ExecutionContext:
         if len(self.events) <= max_events:
             return
 
-        # Preserve every system event (they hold the agent instructions).
-        if keep_system:
-            system_events = [
-                event
-                for event in self.events
-                if event.type == "system"
-            ]
-        else:
-            system_events = []
-
-        # The rest of the budget goes to the newest non-system events.
-        non_system_events = [
-            event
-            for event in self.events
-            if not (keep_system and event.type == "system")
+        # 1. Separate system events (always kept).
+        system_events = (
+            [e for e in self.events if e.type == "system"]
+            if keep_system
+            else []
+        )
+        non_system = [
+            e for e in self.events
+            if not (keep_system and e.type == "system")
         ]
 
-        remaining = max(1, max_events - len(system_events))
-        kept_non_system = non_system_events[-remaining:]
+        # 2. Group non-system events into turns.
+        turns: list[list[Event]] = []
+        current_turn: list[Event] = []
 
-        # Rebuild the list preserving the original order.
-        kept_ids = {id(e) for e in system_events} | {
-            id(e) for e in kept_non_system
-        }
+        for event in non_system:
+            current_turn.append(event)
+
+            # A turn ends when we see an assistant message that has
+            # NO tool calls (i.e. the final answer of the turn).
+            if event.type == "assistant" and not _contains_tool_call(
+                event.content
+            ):
+                turns.append(current_turn)
+                current_turn = []
+
+        # Any leftover events form a final (incomplete) turn.
+        if current_turn:
+            turns.append(current_turn)
+
+        # 3. Keep the newest turns that fit in the budget.
+        remaining = max(1, max_events - len(system_events))
+        kept_turns: list[list[Event]] = []
+        used = 0
+
+        for turn in reversed(turns):
+            if used + len(turn) > remaining:
+                break
+            kept_turns.append(turn)
+            used += len(turn)
+
+        kept_turns.reverse()
+
+        # 4. Rebuild the event list preserving original order.
+        kept_ids = {id(e) for e in system_events}
+        for turn in kept_turns:
+            for e in turn:
+                kept_ids.add(id(e))
 
         self.events = [
-            event for event in self.events if id(event) in kept_ids
+            e for e in self.events if id(e) in kept_ids
         ]
 
     def __len__(self) -> int:
         return len(self.events)
+
+
+def _contains_tool_call(content: Any) -> bool:
+    """Return True if the content contains at least one ToolCall-like item."""
+    items = content if isinstance(content, list) else [content]
+
+    for item in items:
+        # Our ToolCall dataclass has ``name`` and ``arguments`` but no
+        # ``role`` attribute. Message has ``role``. This is a
+        # lightweight duck-typing check that avoids importing
+        # ``ToolCall`` here (avoids a circular import).
+        if hasattr(item, "name") and hasattr(item, "arguments"):
+            return True
+
+    return False

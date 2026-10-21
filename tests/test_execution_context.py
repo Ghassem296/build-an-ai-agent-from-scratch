@@ -1,9 +1,8 @@
-
 import unittest
 from datetime import datetime, timezone
 
 from app.execution_context import Event, ExecutionContext
-from app.llm_client import Message
+from app.llm_client import Message, ToolCall, ToolResult
 
 
 class TestEvent(unittest.TestCase):
@@ -122,23 +121,9 @@ class TestExecutionContext(unittest.TestCase):
         context.create_event("assistant", "Hi")
         self.assertEqual(len(context), 2)
 
-    def test_truncate_history_keeps_system_and_latest(self):
-        context = ExecutionContext()
-        context.create_event("system", "You are a helper.")
-        context.create_event("user", "first")
-        context.create_event("assistant", "a1")
-        context.create_event("user", "second")
-        context.create_event("assistant", "a2")
-        context.create_event("user", "third")
-
-        context.truncate_history(max_events=3, keep_system=True)
-
-        # system + 2 latest non-system events
-        self.assertEqual(len(context.events), 3)
-        self.assertEqual(context.events[0].type, "system")
-        self.assertEqual(context.events[0].content, "You are a helper.")
-        self.assertEqual(context.events[1].content, "a2")
-        self.assertEqual(context.events[2].content, "third")
+    # ============================================================
+    # truncate_history tests (turn-based behavior)
+    # ============================================================
 
     def test_truncate_history_noop_when_under_limit(self):
         context = ExecutionContext()
@@ -153,42 +138,82 @@ class TestExecutionContext(unittest.TestCase):
         with self.assertRaises(ValueError):
             context.truncate_history(max_events=0)
 
-def test_truncate_history_preserves_tool_call_pairs(self):
-    """Truncation must not split a tool_call from its tool_result."""
-    from app.llm_client import Message, ToolCall, ToolResult
+    def test_truncate_history_keeps_system_and_latest_turn(self):
+        """The system prompt and the most recent turn (even if partial)
+        are preserved.
+        """
+        context = ExecutionContext()
+        context.create_event("system", "You are a helper.")
+        context.create_event("user", [Message(role="user", content="first")])
+        context.create_event(
+            "assistant",
+            [Message(role="assistant", content="a1")],
+        )
+        context.create_event("user", [Message(role="user", content="second")])
+        context.create_event(
+            "assistant",
+            [Message(role="assistant", content="a2")],
+        )
+        context.create_event("user", [Message(role="user", content="third")])
 
-    context = ExecutionContext()
-    context.create_event("system", "sys")
+        context.truncate_history(max_events=3, keep_system=True)
 
-    # Turn 1: user + assistant(tool_call) + tool(result) + assistant(text)
-    context.create_event("user", [Message(role="user", content="q1")])
-    context.create_event("assistant", [
-        ToolCall(id="call-1", name="search_web", arguments={"query": "x"})
-    ])
-    context.create_event("tool", [
-        ToolResult(tool_call_id="call-1", name="search_web", content="r1")
-    ])
-    context.create_event("assistant", [Message(role="assistant", content="a1")])
+        # The system prompt is preserved.
+        # The most recent partial turn ("third") is also preserved so
+        # the user's current question is never lost.
+        # Turn 2 does not fit in the remaining budget (1 + 2 > 2).
+        self.assertEqual(len(context.events), 2)
+        self.assertEqual(context.events[0].type, "system")
+        self.assertEqual(context.events[0].content, "You are a helper.")
+        self.assertEqual(context.events[1].content[0].content, "third")
 
-    # Turn 2: user + assistant(text)
-    context.create_event("user", [Message(role="user", content="q2")])
-    context.create_event("assistant", [Message(role="assistant", content="a2")])
+    def test_truncate_history_preserves_tool_call_pairs(self):
+        """Truncation must not split a tool_call from its tool_result."""
+        context = ExecutionContext()
+        context.create_event("system", "sys")
 
-    # Ask for only 2 non-system events.
-    context.truncate_history(max_events=3, keep_system=True)
+        # Turn 1: user + assistant(tool_call) + tool(result) + assistant(text)
+        context.create_event("user", [Message(role="user", content="q1")])
+        context.create_event(
+            "assistant",
+            [
+                ToolCall(
+                    id="call-1",
+                    name="search_web",
+                    arguments={"query": "x"},
+                )
+            ],
+        )
+        context.create_event(
+            "tool",
+            [
+                ToolResult(
+                    tool_call_id="call-1",
+                    name="search_web",
+                    content="r1",
+                )
+            ],
+        )
+        context.create_event(
+            "assistant",
+            [Message(role="assistant", content="a1")],
+        )
 
-    # We should keep: system + turn 2 (user q2, assistant a2).
-    # Turn 1 must be dropped entirely (not partially).
-    types = [e.type for e in context.events]
-    self.assertEqual(types, ["system", "user", "assistant"])
-    self.assertEqual(
-        context.events[1].content[0].content,
-        "q2",
-    )
-    self.assertEqual(
-        context.events[2].content[0].content,
-        "a2",
-    )
+        # Turn 2: user + assistant(text)
+        context.create_event("user", [Message(role="user", content="q2")])
+        context.create_event(
+            "assistant",
+            [Message(role="assistant", content="a2")],
+        )
+
+        context.truncate_history(max_events=3, keep_system=True)
+
+        # We should keep: system + turn 2 (user q2, assistant a2).
+        # Turn 1 must be dropped entirely (not partially).
+        types = [e.type for e in context.events]
+        self.assertEqual(types, ["system", "user", "assistant"])
+        self.assertEqual(context.events[1].content[0].content, "q2")
+        self.assertEqual(context.events[2].content[0].content, "a2")
 
 
 if __name__ == "__main__":
