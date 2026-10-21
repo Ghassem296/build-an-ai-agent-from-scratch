@@ -66,6 +66,7 @@ class Agent:
 
         self.context: ExecutionContext | None = None
         self._allowed_tools: set[str] = set()
+        self._tool_definitions: list[dict[str, Any]] = []
 
     def seed_system_prompt(self, context: ExecutionContext) -> None:
         """Add the system prompt to a context if not already present."""
@@ -80,6 +81,13 @@ class Agent:
             "system",
             [Message(role="system", content=self.system_prompt)],
         )
+
+    async def _ensure_tool_definitions(self) -> list[dict[str, Any]]:
+        """Lazy-load MCP tool definitions (cached)."""
+        if not self._tool_definitions:
+            self._tool_definitions = await self._get_tool_definitions()
+
+        return self._tool_definitions
 
     async def run(
         self,
@@ -111,7 +119,7 @@ class Agent:
             context.execution_id,
         )
 
-        tool_definitions = await self._get_tool_definitions()
+        tool_definitions = await self._ensure_tool_definitions()
 
         logger.info(
             "Available MCP tools: %s",
@@ -147,10 +155,7 @@ class Agent:
         return await self._request_final_answer(context)
 
     async def _get_tool_definitions(self) -> list[dict[str, Any]]:
-        """Convert MCP tool schemas to the LiteLLM/OpenAI tool format.
-
-        Also records the set of allowed tool names for later checks.
-        """
+        """Convert MCP tool schemas to the LiteLLM/OpenAI tool format."""
         try:
             response = await self.mcp_session.list_tools()
         except asyncio.CancelledError:
@@ -228,6 +233,9 @@ class Agent:
         tools: list[dict[str, Any]] | None = None,
     ) -> LlmResponse:
         """Perform one think-act cycle."""
+        if tools is None:
+            tools = await self._ensure_tool_definitions()
+
         request = self._prepare_llm_request(context, tools=tools)
 
         response = await self.think(request)
@@ -258,6 +266,8 @@ class Agent:
         Only tools whose names appear in ``self._allowed_tools`` are
         executed. Unknown tools are rejected with a ToolResult error.
         """
+        await self._ensure_tool_definitions()
+
         tool_results: list[ToolResult] = []
 
         for tool_call in tool_calls:
@@ -280,7 +290,7 @@ class Agent:
                 )
                 continue
 
-            logger.info(
+            logger.debug(
                 "LLM requested MCP tool: %s; arguments=%s",
                 tool_call.name,
                 tool_call.arguments,
@@ -377,12 +387,7 @@ class Agent:
 
     @staticmethod
     def _normalize_tool_result(result: Any) -> str:
-        """Convert MCP result content into readable text.
-
-        Very large tool outputs are truncated to ``MAX_TOOL_RESULT_CHARS``
-        to keep the context window under control and reduce the risk of
-        prompt injection from untrusted search results.
-        """
+        """Convert MCP result content into readable text."""
         content = getattr(result, "content", None)
 
         if content is None:
@@ -436,11 +441,7 @@ class Agent:
         self,
         context: ExecutionContext,
     ) -> str:
-        """Request a final response without allowing additional tool calls.
-
-        The step-limit message is added ONLY to this request, not to
-        the persistent context.
-        """
+        """Request a final response without allowing additional tool calls."""
         request = self._prepare_llm_request(context, tools=[])
 
         request.messages = [
