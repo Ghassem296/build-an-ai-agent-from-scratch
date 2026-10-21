@@ -32,21 +32,14 @@ def configure_logging() -> None:
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
 
-    # Enable diagnostics for LLM requests and HTTP retries.
     logging.getLogger("LiteLLM").setLevel(logging.DEBUG)
     logging.getLogger("litellm").setLevel(logging.DEBUG)
     logging.getLogger("openai").setLevel(logging.DEBUG)
-
-    # INFO is usually enough to observe HTTP request activity.
     logging.getLogger("httpx").setLevel(logging.INFO)
 
 
 def build_mcp_environment() -> dict[str, str]:
-    """
-    Pass only the environment variables required by the MCP server.
-
-    Add other variables here only if tools.mcp_server explicitly needs them.
-    """
+    """Pass only the environment variables required by the MCP server."""
     allowed_names = (
         "PATH",
         "SYSTEMROOT",
@@ -66,14 +59,25 @@ def build_mcp_environment() -> dict[str, str]:
         if name in os.environ
     }
 
-    # Ensure the MCP subprocess uses UTF-8 where supported.
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
 
     return env
 
 
+def create_llm_client() -> LlmClient:
+    """Create a fresh LLM client from the current settings."""
+    return LlmClient(
+        model=settings.llm_model,
+        api_key=settings.llm_api_key,
+        api_base=settings.llm_api_base,
+        temperature=settings.llm_temperature,
+        timeout=settings.llm_timeout,
+    )
+
+
 async def run_agent(prompt: str) -> str:
+    """Run the agent once for a single prompt (non-interactive mode)."""
     server_params = StdioServerParameters(
         command=sys.executable,
         args=["-m", "tools.mcp_server"],
@@ -92,16 +96,8 @@ async def run_agent(prompt: str) -> str:
 
         await session.initialize()
 
-        llm_client = LlmClient(
-            model=settings.llm_model,
-            api_key=settings.llm_api_key,
-            api_base=settings.llm_api_base,
-            temperature=settings.llm_temperature,
-            timeout=settings.llm_timeout,
-        )
-
         agent = Agent(
-            llm_client=llm_client,
+            llm_client=create_llm_client(),
             mcp_session=session,
             tool_timeout=settings.tool_timeout,
         )
@@ -128,32 +124,65 @@ def parse_args() -> argparse.Namespace:
 
 
 async def interactive_loop() -> None:
+    """Interactive mode with a *single* Agent shared across turns.
+
+    The same MCP session and the same ExecutionContext are reused for
+    every user prompt, so the agent remembers earlier turns.
+    """
     logger = logging.getLogger(__name__)
 
-    while True:
-        try:
-            prompt = input("\nYou: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            break
+    server_params = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "tools.mcp_server"],
+        cwd=str(PROJECT_ROOT),
+        env=build_mcp_environment(),
+    )
 
-        if prompt.lower() in {"exit", "quit"}:
-            break
+    async with AsyncExitStack() as stack:
+        read_stream, write_stream = await stack.enter_async_context(
+            stdio_client(server_params)
+        )
 
-        if not prompt:
-            continue
+        session = await stack.enter_async_context(
+            ClientSession(read_stream, write_stream)
+        )
 
-        try:
-            answer = await run_agent(prompt)
-            print(f"\nAssistant: {answer}")
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Agent execution failed")
-            print(
-                "خطا در اجرای درخواست؛ "
-                "جزئیات خطا در لاگ ثبت شده است."
-            )
+        await session.initialize()
+
+        # One agent for the whole session → conversation continuity.
+        agent = Agent(
+            llm_client=create_llm_client(),
+            mcp_session=session,
+            tool_timeout=settings.tool_timeout,
+        )
+
+        while True:
+            try:
+                prompt = input("\nYou: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+
+            if prompt.lower() in {"exit", "quit"}:
+                break
+
+            if not prompt:
+                continue
+
+            try:
+                answer = await agent.run(
+                    prompt,
+                    max_steps=settings.agent_max_steps,
+                )
+                print(f"\nAssistant: {answer}")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Agent execution failed")
+                print(
+                    "خطا در اجرای درخواست؛ "
+                    "جزئیات خطا در لاگ ثبت شده است."
+                )
 
 
 async def async_main() -> None:
