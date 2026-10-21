@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -37,6 +38,11 @@ def _get_float(name: str, default: float) -> float:
         raise ValueError(
             f"{name} must be a number; received {value!r}"
         ) from exc
+
+    if not math.isfinite(result):
+        raise ValueError(
+            f"{name} must be a finite number; received {value!r}"
+        )
 
     return result
 
