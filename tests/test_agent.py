@@ -1,9 +1,9 @@
-import asyncio
+﻿import asyncio
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from app.agent import Agent
+from app.agent import EMPTY_ANSWER_MESSAGE, Agent
 from app.execution_context import ExecutionContext
 from app.llm_client import (
     LlmRequest,
@@ -541,5 +541,15 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             "search_web",
             {"query": "test"},
         )
+
+    async def test_empty_answer_is_not_returned_as_is(self):
+        """A model reply with no content must not produce an empty answer."""
+        self.llm_client.complete.return_value = LlmResponse(content=[])
+
+        answer = await self.agent.run("Hello", max_steps=3)
+
+        self.assertTrue(answer)
+        self.assertEqual(answer, EMPTY_ANSWER_MESSAGE)
+
 if __name__ == "__main__":
     unittest.main()

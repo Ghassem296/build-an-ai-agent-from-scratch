@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import logging
@@ -41,6 +41,10 @@ STEP_LIMIT_NOTE = (
     "Do not request or call more tools."
 )
 
+
+EMPTY_ANSWER_MESSAGE = (
+    "The model returned an empty answer. Please try rephrasing your question."
+)
 
 MAX_TOOL_RESULT_CHARS = 10_000
 
@@ -158,7 +162,15 @@ class Agent:
                     "Execution %s finished without further tool calls",
                     context.execution_id,
                 )
-                return self._store_final_result(response.content)
+                answer = self._store_final_result(response.content)
+                if answer:
+                    return answer
+
+                logger.warning(
+                    "Execution %s produced an empty answer",
+                    context.execution_id,
+                )
+                return EMPTY_ANSWER_MESSAGE
 
         logger.warning(
             "Execution %s reached max_steps=%d",
