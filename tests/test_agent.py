@@ -565,19 +565,6 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("cut off", answer)
 
 
-    async def test_truncated_answer_is_marked(self):
-        """An answer cut off by the output limit must say so."""
-        self.llm_client.complete.return_value = LlmResponse(
-            content=[Message(role="assistant", content="partial answer")],
-            finish_reason="length",
-        )
-
-        answer = await self.agent.run("Hello", max_steps=3)
-
-        self.assertIn("partial answer", answer)
-        self.assertIn("cut off", answer)
-
-
     async def test_context_budget_drops_oldest_turn(self):
         """The oldest turn is dropped when the budget is exceeded."""
         self.agent.max_context_chars = 120
