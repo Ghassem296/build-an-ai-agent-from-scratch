@@ -1,78 +1,42 @@
+"""Standalone demo entry point.
+
+This mirrors what ``python -m app.main "<prompt>"`` does and exists for
+readers following the book chapter by chapter. The supported entry point is
+``app.main``; this module now reuses the shared MCP runtime instead of
+carrying its own copy of the subprocess environment.
+
+Usage::
+
+    python mcp_agent.py
+"""
+
+from __future__ import annotations
+
 import asyncio
 import logging
-import sys
 from pathlib import Path
 
-from mcp import ClientSession, StdioServerParameters
-from mcp.client.stdio import stdio_client
-
 from app.agent import Agent
-from app.config import settings
+from app.config import get_settings
 from app.llm_client import LlmClient
+from app.mcp_runtime import mcp_session
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
 logger = logging.getLogger(__name__)
 
-AGENT_INSTRUCTIONS = (
-    "You are a helpful research assistant. "
-    "Use the provided tools when needed and summarize "
-    "the results clearly. Distinguish verified facts from "
-    "uncertain information."
+DEMO_PROMPT = (
+    "Find the latest artificial intelligence news using web search, "
+    "then summarize the three most relevant results. "
+    "Include source URLs when available."
 )
 
 
-def build_mcp_environment() -> dict[str, str]:
-    """Pass only the environment variables required by the MCP server."""
-    import os
+def create_llm_client() -> LlmClient:
+    settings = get_settings()
 
-    allowed_names = (
-        "PATH",
-        "SYSTEMROOT",
-        "WINDIR",
-        "TEMP",
-        "TMP",
-        "USERPROFILE",
-        "APPDATA",
-        "LOCALAPPDATA",
-        "HOME",
-        "LANG",
-        "LC_ALL",
-        "PYTHONIOENCODING",
-        "PYTHONUTF8",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "no_proxy",
-        "SSL_CERT_FILE",
-        "SSL_CERT_DIR",
-    )
-
-    env = {
-        name: os.environ[name]
-        for name in allowed_names
-        if name in os.environ
-    }
-
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-
-    return env
-
-
-async def main() -> None:
-    """Connect to the MCP server and run the agent."""
-
-    if not settings.llm_api_key:
-        raise RuntimeError(
-            "No API key found. Set LLM_API_KEY or XAI_1_API_KEY "
-            "in the project's .env file."
-        )
-
-    llm_client = LlmClient(
+    return LlmClient(
         model=settings.llm_model,
         api_base=settings.llm_api_base,
         api_key=settings.llm_api_key,
@@ -80,53 +44,44 @@ async def main() -> None:
         timeout=settings.llm_timeout,
     )
 
-    server_params = StdioServerParameters(
-        command=sys.executable,
-        args=["-m", "tools.mcp_server"],
-        cwd=str(PROJECT_DIR),
-        env=build_mcp_environment(),
-    )
 
-    async with stdio_client(server_params) as (
-        read_stream,
-        write_stream,
-    ):
-        async with ClientSession(
-            read_stream,
-            write_stream,
-        ) as session:
-            await session.initialize()
+async def main() -> None:
+    """Connect to the MCP server and run the demo prompt."""
+    settings = get_settings()
 
-            tools_result = await session.list_tools()
+    if not settings.llm_api_key:
+        raise RuntimeError(
+            "No API key found. Set LLM_API_KEY or XAI_1_API_KEY "
+            "in the project's .env file."
+        )
 
-            print("Connected to MCP server.")
-            print("Available tools:")
+    async with mcp_session(PROJECT_DIR) as session:
+        tools_result = await session.list_tools()
 
-            for tool in tools_result.tools:
-                print(f"- {tool.name}: {tool.description or ''}")
+        print("Connected to MCP server.")
+        print("Available tools:")
 
-            agent = Agent(
-                llm_client=llm_client,
-                mcp_session=session,
-                tool_timeout=settings.tool_timeout,
-            )
+        for tool in tools_result.tools:
+            print(f"- {tool.name}: {tool.description or ''}")
 
-            prompt = (
-                "Find the latest artificial intelligence news "
-                "using web search, then summarize the three most "
-                "relevant results. Include source URLs when available."
-            )
+        agent = Agent(
+            llm_client=create_llm_client(),
+            mcp_session=session,
+            tool_timeout=settings.tool_timeout,
+        )
 
-            answer = await agent.run(
-                prompt,
-                max_steps=settings.agent_max_steps,
-            )
+        answer = await agent.run(
+            DEMO_PROMPT,
+            max_steps=settings.agent_max_steps,
+        )
 
-            print("\n=== FINAL ANSWER ===")
-            print(answer)
+        print("\n=== FINAL ANSWER ===")
+        print(answer)
 
 
 if __name__ == "__main__":
+    settings = get_settings()
+
     logging.basicConfig(
         level=getattr(logging, settings.log_level),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",

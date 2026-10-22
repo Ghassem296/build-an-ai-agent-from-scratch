@@ -35,6 +35,13 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 
 
+STEP_LIMIT_NOTE = (
+    "The tool-use step limit has been reached. "
+    "Answer the user using the information already available. "
+    "Do not request or call more tools."
+)
+
+
 MAX_TOOL_RESULT_CHARS = 10_000
 
 
@@ -108,7 +115,11 @@ class Agent:
 
         if context is None:
             context = ExecutionContext(execution_id=str(uuid4()))
-            self.context = context
+
+        # Keep ``self.context`` in sync even when the caller supplies a
+        # long-lived context (interactive mode). Previously it only pointed at
+        # the context of the first run, which made ``agent.context`` lie.
+        self.context = context
 
         self.seed_system_prompt(context)
 
@@ -298,12 +309,19 @@ class Agent:
             schema = self._tool_schemas.get(tool_call.name)
 
             if schema is not None:
+                # ``validate`` raises ValidationError for bad *arguments* and
+                # SchemaError for a bad *schema* (a malformed ``inputSchema``
+                # coming from the MCP server). Only the former used to be
+                # caught, so a broken server schema crashed the whole loop.
                 try:
                     jsonschema.validate(
                         instance=tool_call.arguments,
                         schema=schema,
                     )
-                except jsonschema.ValidationError as exc:
+                except (
+                    jsonschema.ValidationError,
+                    jsonschema.exceptions.SchemaError,
+                ) as exc:
                     logger.warning(
                         "Invalid arguments for tool %r: %s",
                         tool_call.name,
@@ -464,6 +482,32 @@ class Agent:
 
         return "\n".join(parts).strip()
 
+    @staticmethod
+    def _with_step_limit_note(
+        messages: list[Message | ToolCall | ToolResult],
+    ) -> list[Message | ToolCall | ToolResult]:
+        """Add the step-limit instruction without duplicating system prompts.
+
+        The original implementation always prepended a *new* system message,
+        so the request carried two of them. Providers that only accept a single
+        leading system message rejected that. Merge into the existing system
+        message when there is one.
+        """
+        for index, item in enumerate(messages):
+            if isinstance(item, Message) and item.role == "system":
+                content = (
+                    f"{item.content}\n\n{STEP_LIMIT_NOTE}"
+                    if item.content
+                    else STEP_LIMIT_NOTE
+                )
+
+                updated = list(messages)
+                updated[index] = Message(role="system", content=content)
+
+                return updated
+
+        return [Message(role="system", content=STEP_LIMIT_NOTE), *messages]
+
     async def _request_final_answer(
         self,
         context: ExecutionContext,
@@ -471,17 +515,7 @@ class Agent:
         """Request a final response without allowing additional tool calls."""
         request = self._prepare_llm_request(context, tools=[])
 
-        request.messages = [
-            Message(
-                role="system",
-                content=(
-                    "The tool-use step limit has been reached. "
-                    "Answer the user using the information already "
-                    "available. Do not request or call more tools."
-                ),
-            ),
-            *request.messages,
-        ]
+        request.messages = self._with_step_limit_note(request.messages)
 
         try:
             response = await self.think(request)

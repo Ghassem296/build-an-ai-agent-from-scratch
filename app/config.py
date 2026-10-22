@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
+from functools import lru_cache
 
 from dotenv import load_dotenv
 
@@ -117,4 +118,12 @@ class Settings:
         )
 
 
-settings = Settings.from_env()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return the process settings, validated and cached on first use.
+
+    Reading the environment at import time made the module impossible to
+    import without a fully valid configuration (and made tests depend on
+    whatever was in the developer's ``.env``). Resolve it lazily instead.
+    """
+    return Settings.from_env()
