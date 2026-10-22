@@ -7,6 +7,7 @@ environment variables and the stdio wiring can only be wrong in one file.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -43,6 +44,10 @@ ALLOWED_ENV_VARS: tuple[str, ...] = (
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
 )
+
+
+# Startup is bounded so a broken server cannot hang the CLI forever.
+INIT_TIMEOUT_SECONDS = 10.0
 
 
 def build_mcp_environment() -> dict[str, str]:
@@ -83,6 +88,7 @@ async def mcp_session(project_root: Path) -> AsyncIterator[ClientSession]:
             ClientSession(read_stream, write_stream)
         )
 
-        await session.initialize()
+        async with asyncio.timeout(INIT_TIMEOUT_SECONDS):
+            await session.initialize()
 
         yield session
