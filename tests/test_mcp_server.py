@@ -1,6 +1,8 @@
-﻿import unittest
+import unittest
+from typing import get_type_hints
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from pydantic import TypeAdapter
 from tools.mcp_server import search_web
 
 
@@ -57,3 +59,11 @@ class TestSearchWeb(unittest.IsolatedAsyncioTestCase):
                 await search_web("test query", max_results=1)
 
         self.assertEqual(call_count, 3)
+
+    def test_max_results_declares_schema_bounds(self):
+        """The signature must expose 1 <= max_results <= 10."""
+        hints = get_type_hints(search_web, include_extras=True)
+        schema = TypeAdapter(hints["max_results"]).json_schema()
+
+        self.assertEqual(schema["minimum"], 1)
+        self.assertEqual(schema["maximum"], 10)

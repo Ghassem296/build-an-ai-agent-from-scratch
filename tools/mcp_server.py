@@ -1,12 +1,13 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from typing import Any
+from typing import Annotated, Any
 
 from ddgs import DDGS
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -42,7 +43,7 @@ def _search_sync(
 @mcp.tool()
 async def search_web(
     query: str,
-    max_results: int = 5,
+    max_results: Annotated[int, Field(ge=1, le=10)] = 5,
 ) -> list[dict[str, Any]]:
     """Search the web and return a list of relevant results.
 
