@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import logging
@@ -14,6 +14,9 @@ logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("web-search")
+
+# Indirection so tests can replace the real sleep with an instant stub.
+_sleep = asyncio.sleep
 
 
 def _search_sync(
@@ -76,7 +79,7 @@ async def search_web(
                 exc,
             )
             if attempt < max_attempts:
-                await asyncio.sleep(backoff)
+                await _sleep(backoff)
                 backoff *= 2
 
     logger.error(

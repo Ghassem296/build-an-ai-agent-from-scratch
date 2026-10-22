@@ -1,5 +1,5 @@
-import unittest
-from unittest.mock import patch, MagicMock
+﻿import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from tools.mcp_server import search_web
 
