@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import asyncio
@@ -60,6 +60,7 @@ def build_agent(session: object) -> Agent:
         llm_client=create_llm_client(),
         mcp_session=session,
         tool_timeout=settings.tool_timeout,
+        max_context_chars=settings.agent_max_context_chars,
     )
 
 

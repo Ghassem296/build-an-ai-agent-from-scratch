@@ -59,6 +59,7 @@ class Agent:
         *,
         tool_timeout: float = 30.0,
         max_history_events: int = 40,
+        max_context_chars: int = 120_000,
         system_prompt: str | None = None,
     ) -> None:
         if tool_timeout <= 0:
@@ -70,7 +71,11 @@ class Agent:
         self.llm_client = llm_client
         self.mcp_session = mcp_session
         self.tool_timeout = tool_timeout
+        if max_context_chars < 1:
+            raise ValueError("max_context_chars must be at least 1")
+
         self.max_history_events = max_history_events
+        self.max_context_chars = max_context_chars
         self.system_prompt = (
             system_prompt
             if system_prompt is not None
@@ -241,6 +246,22 @@ class Agent:
             max_events=self.max_history_events,
             keep_system=True,
         )
+
+        dropped_turns = 0
+
+        while (
+            context.total_chars() > self.max_context_chars
+            and context.drop_oldest_turn()
+        ):
+            dropped_turns += 1
+
+        if dropped_turns:
+            logger.info(
+                "Execution %s: dropped %d old turn(s) to stay under %d chars",
+                context.execution_id,
+                dropped_turns,
+                self.max_context_chars,
+            )
 
         messages: list[Message | ToolCall | ToolResult] = []
 

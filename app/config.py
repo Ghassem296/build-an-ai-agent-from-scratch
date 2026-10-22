@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import math
 import os
@@ -56,6 +56,7 @@ class Settings:
     llm_temperature: float
     llm_timeout: float
     agent_max_steps: int
+    agent_max_context_chars: int
     tool_timeout: float
     log_level: str
 
@@ -73,6 +74,12 @@ class Settings:
         llm_timeout = _get_float("LLM_TIMEOUT", 60.0)
         tool_timeout = _get_float("TOOL_TIMEOUT", 30.0)
         max_steps = _get_int("AGENT_MAX_STEPS", 10)
+        max_context_chars = _get_int("AGENT_MAX_CONTEXT_CHARS", 120_000)
+
+        if max_context_chars < 1:
+            raise ValueError(
+                "AGENT_MAX_CONTEXT_CHARS must be at least 1"
+            )
 
         if not 0.0 <= temperature <= 2.0:
             raise ValueError("LLM_TEMPERATURE must be between 0 and 2")
@@ -113,6 +120,7 @@ class Settings:
             llm_temperature=temperature,
             llm_timeout=llm_timeout,
             agent_max_steps=max_steps,
+            agent_max_context_chars=max_context_chars,
             tool_timeout=tool_timeout,
             log_level=log_level,
         )

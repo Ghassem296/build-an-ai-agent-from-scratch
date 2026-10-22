@@ -577,5 +577,27 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("partial answer", answer)
         self.assertIn("cut off", answer)
 
+
+    async def test_context_budget_drops_oldest_turn(self):
+        """The oldest turn is dropped when the budget is exceeded."""
+        self.agent.max_context_chars = 120
+        context = ExecutionContext()
+        self.llm_client.complete.return_value = LlmResponse(
+            content=[Message(role="assistant", content="ok" * 100)]
+        )
+
+        await self.agent.run("a" * 100, context=context, max_steps=1)
+        await self.agent.run("b" * 100, context=context, max_steps=1)
+
+        request = self.llm_client.complete.await_args.args[0]
+        contents = [
+            item.content
+            for item in request.messages
+            if isinstance(item, Message)
+        ]
+
+        self.assertNotIn("a" * 100, contents)
+        self.assertIn("b" * 100, contents)
+
 if __name__ == "__main__":
     unittest.main()

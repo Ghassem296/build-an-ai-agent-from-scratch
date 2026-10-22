@@ -1,4 +1,4 @@
-import unittest
+﻿import unittest
 from datetime import datetime, timezone
 
 from app.execution_context import Event, ExecutionContext
@@ -247,6 +247,31 @@ class TestExecutionContext(unittest.TestCase):
             ["system", "user", "assistant", "tool", "assistant"],
         )
         self.assertEqual(context.events[1].content[0].content, "q1")
+
+
+    def test_total_chars_and_drop_oldest_turn(self):
+        """The char budget helper must drop only the oldest turn."""
+        context = ExecutionContext()
+        context.create_event(
+            "system", [Message(role="system", content="sys")]
+        )
+        context.create_event(
+            "user", [Message(role="user", content="a" * 10)]
+        )
+        context.create_event(
+            "assistant", [Message(role="assistant", content="b" * 10)]
+        )
+        context.create_event(
+            "user", [Message(role="user", content="c" * 10)]
+        )
+        context.create_event(
+            "assistant", [Message(role="assistant", content="d" * 10)]
+        )
+
+        self.assertEqual(context.total_chars(), 43)
+        self.assertTrue(context.drop_oldest_turn())
+        self.assertEqual(len(context), 3)
+        self.assertFalse(context.drop_oldest_turn())
 
 if __name__ == "__main__":
     unittest.main()

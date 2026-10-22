@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -138,6 +138,55 @@ class ExecutionContext:
         self.events = [
             e for e in self.events if id(e) in kept_ids
         ]
+
+    def total_chars(self) -> int:
+        """Approximate the history size in characters."""
+        total = 0
+
+        for event in self.events:
+            content = event.content
+            items = content if isinstance(content, list) else [content]
+
+            for item in items:
+                text = getattr(item, "content", None)
+
+                if text is None:
+                    text = str(item)
+
+                total += len(text)
+
+        return total
+
+    def drop_oldest_turn(self) -> bool:
+        """Drop the oldest non-system turn.
+
+        System events and the most recent turn are always kept.
+        Returns True when a turn was removed.
+        """
+        non_system = [e for e in self.events if e.type != "system"]
+
+        turns: list[list[Event]] = []
+        current_turn: list[Event] = []
+
+        for event in non_system:
+            current_turn.append(event)
+
+            if event.type == "assistant" and not _contains_tool_call(
+                event.content
+            ):
+                turns.append(current_turn)
+                current_turn = []
+
+        if current_turn:
+            turns.append(current_turn)
+
+        if len(turns) <= 1:
+            return False
+
+        dropped = {id(e) for e in turns[0]}
+        self.events = [e for e in self.events if id(e) not in dropped]
+
+        return True
 
     def __len__(self) -> int:
         return len(self.events)
