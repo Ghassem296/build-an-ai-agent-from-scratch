@@ -28,6 +28,12 @@ Jungjun Hur & Younghee Song).
   `tool` result. The most recent turn is always preserved.
 - **Bounded tool output** — tool results are capped at 10 000 characters so one
   noisy search cannot blow up the context window.
+- **Truncation is surfaced** &mdash; when the model stops because it hit its
+  output limit (`finish_reason == "length"`), the answer is annotated instead of
+  being passed off as complete.
+- **Character budget for history** &mdash; `AGENT_MAX_CONTEXT_CHARS` drops the
+  oldest turns (never the system prompt or the newest turn) before a request is
+  sent.
 - **Timeouts and retries** — each tool call is bounded by `TOOL_TIMEOUT`; web
   search retries 3 times with exponential backoff; LLM calls use LiteLLM's
   `num_retries`.
@@ -37,7 +43,7 @@ Jungjun Hur & Younghee Song).
   data.
 - **Minimal MCP environment** — the subprocess receives an explicit allowlist of
   environment variables, so API keys and tokens never reach it.
-- **75 tests, no network required** — the LLM and the MCP session are mocked.
+- **79 tests, no network required** — the LLM and the MCP session are mocked.
 - **CI on Linux and Windows** — Python 3.11, 3.12 and 3.13.
 
 ---
@@ -89,6 +95,7 @@ All settings are read from the environment (`.env` is loaded automatically).
 | `LLM_TEMPERATURE` | `0` | 0–2. |
 | `LLM_TIMEOUT` | `60` | Seconds per LLM request. |
 | `AGENT_MAX_STEPS` | `10` | Think-act cycles before the agent is forced to answer. |
+| `AGENT_MAX_CONTEXT_CHARS` | `120000` | Characters of history kept; older turns are dropped beyond it. |
 | `TOOL_TIMEOUT` | `30` | Seconds per tool call. |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
 
@@ -185,8 +192,8 @@ uv.lock             pinned dependency graph (commit it)
 - The web-search tool scrapes DuckDuckGo through `ddgs`; it can be rate-limited.
 - Agent state is in memory only — there is no persistence, resumability or
   streaming.
-- No per-run token budget: `AGENT_MAX_STEPS` caps the number of cycles, not the
-  number of tokens.
+- The history budget is measured in characters, not tokens, so it is an
+  approximation; a tokenizer-aware limit would be more precise.
 - Tool output is treated as untrusted text, but prompt injection is mitigated
   rather than prevented.
 

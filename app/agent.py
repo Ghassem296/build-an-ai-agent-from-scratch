@@ -68,12 +68,12 @@ class Agent:
         if max_history_events < 1:
             raise ValueError("max_history_events must be at least 1")
 
-        self.llm_client = llm_client
-        self.mcp_session = mcp_session
-        self.tool_timeout = tool_timeout
         if max_context_chars < 1:
             raise ValueError("max_context_chars must be at least 1")
 
+        self.llm_client = llm_client
+        self.mcp_session = mcp_session
+        self.tool_timeout = tool_timeout
         self.max_history_events = max_history_events
         self.max_context_chars = max_context_chars
         self.system_prompt = (

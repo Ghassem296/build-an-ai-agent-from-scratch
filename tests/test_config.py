@@ -1,4 +1,4 @@
-
+﻿
 import unittest
 from unittest.mock import patch
 
@@ -15,6 +15,7 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(settings.llm_timeout, 60.0)
         self.assertEqual(settings.tool_timeout, 30.0)
         self.assertEqual(settings.agent_max_steps, 10)
+        self.assertEqual(settings.agent_max_context_chars, 120_000)
         self.assertEqual(settings.log_level, "INFO")
         self.assertIsNone(settings.llm_api_key)
         self.assertIsNone(settings.llm_api_base)
@@ -79,5 +80,16 @@ class TestSettings(unittest.TestCase):
             Settings.from_env()
 
 
+
+    @patch.dict(
+        "os.environ", {"AGENT_MAX_CONTEXT_CHARS": "0"}, clear=True
+    )
+    def test_non_positive_context_chars_is_rejected(self):
+        with self.assertRaisesRegex(
+            ValueError, "AGENT_MAX_CONTEXT_CHARS"
+        ):
+            Settings.from_env()
+
 if __name__ == "__main__":
     unittest.main()
+

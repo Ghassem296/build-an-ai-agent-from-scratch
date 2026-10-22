@@ -1,4 +1,4 @@
-"""Standalone demo entry point.
+﻿"""Standalone demo entry point.
 
 This mirrors what ``python -m app.main "<prompt>"`` does and exists for
 readers following the book chapter by chapter. The supported entry point is
@@ -68,6 +68,7 @@ async def main() -> None:
             llm_client=create_llm_client(),
             mcp_session=session,
             tool_timeout=settings.tool_timeout,
+            max_context_chars=settings.agent_max_context_chars,
         )
 
         answer = await agent.run(
