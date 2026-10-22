@@ -292,82 +292,81 @@ class Agent:
     ) -> list[ToolResult]:
         """Execute the tool calls requested by the LLM.
 
-        Validates tool names and arguments before execution.
+        Independent calls run concurrently, which matters when the model
+        asks for several searches at once. Results keep the original order
+        so every tool result stays aligned with its tool call.
         """
         await self._ensure_tool_definitions()
 
-        tool_results: list[ToolResult] = []
+        if not tool_calls:
+            return []
 
-        for tool_call in tool_calls:
-            if tool_call.name not in self._allowed_tools:
-                logger.warning(
-                    "Rejected unknown tool %r (allowed: %s)",
-                    tool_call.name,
-                    sorted(self._allowed_tools),
-                )
-                tool_results.append(
-                    ToolResult(
-                        tool_call_id=tool_call.id,
-                        name=tool_call.name,
-                        content=(
-                            f"Unknown tool {tool_call.name!r}. "
-                            f"Allowed tools: {sorted(self._allowed_tools)}"
-                        ),
-                        is_error=True,
-                    )
-                )
-                continue
+        return list(
+            await asyncio.gather(
+                *(self._run_tool_call(call) for call in tool_calls)
+            )
+        )
 
-            schema = self._tool_schemas.get(tool_call.name)
-
-            if schema is not None:
-                # ``validate`` raises ValidationError for bad *arguments* and
-                # SchemaError for a bad *schema* (a malformed ``inputSchema``
-                # coming from the MCP server). Only the former used to be
-                # caught, so a broken server schema crashed the whole loop.
-                try:
-                    jsonschema.validate(
-                        instance=tool_call.arguments,
-                        schema=schema,
-                    )
-                except (
-                    jsonschema.ValidationError,
-                    jsonschema.exceptions.SchemaError,
-                ) as exc:
-                    logger.warning(
-                        "Invalid arguments for tool %r: %s",
-                        tool_call.name,
-                        exc.message,
-                    )
-                    tool_results.append(
-                        ToolResult(
-                            tool_call_id=tool_call.id,
-                            name=tool_call.name,
-                            content=(
-                                f"Invalid arguments for {tool_call.name!r}: "
-                                f"{exc.message}"
-                            ),
-                            is_error=True,
-                        )
-                    )
-                    continue
-
-            logger.debug(
-                "LLM requested MCP tool: %s; arguments=%s",
+    async def _run_tool_call(self, tool_call: ToolCall) -> ToolResult:
+        """Validate and execute a single tool call."""
+        if tool_call.name not in self._allowed_tools:
+            logger.warning(
+                "Rejected unknown tool %r (allowed: %s)",
                 tool_call.name,
-                tool_call.arguments,
+                sorted(self._allowed_tools),
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=(
+                    f"Unknown tool {tool_call.name!r}. "
+                    f"Allowed tools: {sorted(self._allowed_tools)}"
+                ),
+                is_error=True,
             )
 
-            result = await self._execute_tool(tool_call)
-            tool_results.append(result)
+        schema = self._tool_schemas.get(tool_call.name)
 
-            logger.info(
-                "MCP tool %s completed; is_error=%s",
-                result.name,
-                result.is_error,
-            )
+        if schema is not None:
+            try:
+                jsonschema.validate(
+                    instance=tool_call.arguments,
+                    schema=schema,
+                )
+            except (
+                jsonschema.ValidationError,
+                jsonschema.exceptions.SchemaError,
+            ) as exc:
+                logger.warning(
+                    "Invalid arguments for tool %r: %s",
+                    tool_call.name,
+                    exc.message,
+                )
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    content=(
+                        f"Invalid arguments for {tool_call.name!r}: "
+                        f"{exc.message}"
+                    ),
+                    is_error=True,
+                )
 
-        return tool_results
+        logger.debug(
+            "LLM requested MCP tool: %s; arguments=%s",
+            tool_call.name,
+            tool_call.arguments,
+        )
+
+        result = await self._execute_tool(tool_call)
+
+        logger.info(
+            "MCP tool %s completed; is_error=%s",
+            result.name,
+            result.is_error,
+        )
+
+        return result
 
     @staticmethod
     def _has_tool_calls(response: LlmResponse) -> bool:
