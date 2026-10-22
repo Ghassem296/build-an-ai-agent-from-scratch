@@ -164,6 +164,16 @@ class Agent:
                 )
                 answer = self._store_final_result(response.content)
                 if answer:
+                    if response.finish_reason == "length":
+                        logger.warning(
+                            "Execution %s: answer truncated by the model",
+                            context.execution_id,
+                        )
+                        return (
+                            answer
+                            + "\n\n[The answer was cut off because the "
+                            "model reached its output limit.]"
+                        )
                     return answer
 
                 logger.warning(

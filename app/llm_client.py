@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 import logging
@@ -72,6 +72,7 @@ class LlmResponse:
     content: list[Message | ToolCall | ToolResult]
     input_tokens: int = 0
     output_tokens: int = 0
+    finish_reason: str | None = None
 
 
 class LlmClient:
@@ -249,6 +250,12 @@ class LlmClient:
             raise ValueError("The model returned no choices")
 
         choice = choices[0]
+
+        finish_reason = (
+            choice.get("finish_reason")
+            if isinstance(choice, dict)
+            else getattr(choice, "finish_reason", None)
+        )
         message = (
             choice.get("message", {})
             if isinstance(choice, dict)
@@ -369,4 +376,5 @@ class LlmClient:
             content=content,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
+            finish_reason=finish_reason,
         )
