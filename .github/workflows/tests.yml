@@ -46,8 +46,14 @@ jobs:
         with:
           enable-cache: true
 
+      # --python makes the matrix authoritative. Without it, uv prefers the
+      # version pinned in .python-version (3.12) and every job would silently
+      # run on 3.12, so the 3.11/3.13 coverage would be fictional.
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: uv sync --python ${{ matrix.python-version }} --all-extras --dev
+
+      - name: Show interpreter
+        run: uv run python -c "import sys; print(sys.version)"
 
       - name: Byte-compile all sources
         run: uv run python -m compileall -q app tools examples tests mcp_agent.py
