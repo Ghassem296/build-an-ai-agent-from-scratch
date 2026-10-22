@@ -586,5 +586,18 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("a" * 100, contents)
         self.assertIn("b" * 100, contents)
 
+
+    async def test_empty_tool_list_is_cached(self):
+        """An empty tool list must be cached, not refetched."""
+        self.mcp_session.list_tools.return_value = SimpleNamespace(tools=[])
+        self.llm_client.complete.return_value = LlmResponse(
+            content=[Message(role="assistant", content="done")]
+        )
+
+        await self.agent.run("first", max_steps=1)
+        await self.agent.run("second", max_steps=1)
+
+        self.mcp_session.list_tools.assert_awaited_once()
+
 if __name__ == "__main__":
     unittest.main()

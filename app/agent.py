@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -85,7 +85,7 @@ class Agent:
         self.context: ExecutionContext | None = None
         self._allowed_tools: set[str] = set()
         self._tool_schemas: dict[str, dict[str, Any]] = {}
-        self._tool_definitions: list[dict[str, Any]] = []
+        self._tool_definitions: list[dict[str, Any]] | None = None
 
     def seed_system_prompt(self, context: ExecutionContext) -> None:
         """Add the system prompt to a context if not already present."""
@@ -103,7 +103,7 @@ class Agent:
 
     async def _ensure_tool_definitions(self) -> list[dict[str, Any]]:
         """Lazy-load MCP tool definitions (cached)."""
-        if not self._tool_definitions:
+        if self._tool_definitions is None:
             self._tool_definitions = await self._get_tool_definitions()
 
         return self._tool_definitions
