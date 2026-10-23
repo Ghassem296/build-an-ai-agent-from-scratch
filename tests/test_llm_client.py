@@ -171,6 +171,28 @@ class TestLlmClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.content[0].arguments, {})
 
     @patch("app.llm_client.acompletion", new_callable=AsyncMock)
+    async def test_malformed_tool_arguments_are_flagged(self, mock_completion):
+        """Invalid tool arguments must not silently become valid empty args."""
+        for raw_arguments, expected_error in (
+            ("{bad json", "not valid JSON"),
+            ("[]", "must be a JSON object"),
+            (None, "unsupported type"),
+        ):
+            with self.subTest(raw_arguments=raw_arguments):
+                mock_completion.return_value = make_response(
+                    tool_calls=[make_tool_call(arguments=raw_arguments)]
+                )
+                response = await self.client.complete(
+                    LlmRequest(
+                        messages=[Message(role="user", content="Run tool")]
+                    )
+                )
+                tool_call = response.content[0]
+                self.assertIsInstance(tool_call, ToolCall)
+                self.assertEqual(tool_call.arguments, {})
+                self.assertIn(expected_error, tool_call.parse_error)
+
+    @patch("app.llm_client.acompletion", new_callable=AsyncMock)
     async def test_complete_includes_tool_definitions(self, mock_completion):
         mock_completion.return_value = make_response(content="Done.")
 
