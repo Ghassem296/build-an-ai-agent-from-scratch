@@ -561,10 +561,13 @@ class Agent:
                 jsonschema.ValidationError,
                 jsonschema.exceptions.SchemaError,
             ) as exc:
+                # Validation messages can include the rejected value itself.
+                # Keep logs diagnostic without recording potentially sensitive
+                # tool arguments.
                 logger.warning(
-                    "Invalid arguments for tool %r: %s",
+                    "Invalid arguments for tool %r (%s)",
                     tool_call.name,
-                    exc.message,
+                    type(exc).__name__,
                 )
                 return ToolResult(
                     tool_call_id=tool_call.id,
