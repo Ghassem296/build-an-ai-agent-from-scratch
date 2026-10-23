@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json  # ← [4.7] برای تبدیل آرگومان‌های ابزار ساختاریافته
+import math
 import logging
 from typing import Any, Optional, Type  # ← [4.7] Optional و Type
 from uuid import uuid4
@@ -73,8 +74,10 @@ class Agent:
         system_prompt: str | None = None,
         output_type: Optional[Type[BaseModel]] = None,  # ← [4.7] پارامتر جدید
     ) -> None:
-        if tool_timeout <= 0:
-            raise ValueError("tool_timeout must be greater than zero")
+        if not math.isfinite(tool_timeout) or tool_timeout <= 0:
+            raise ValueError(
+                "tool_timeout must be a finite number greater than zero"
+            )
 
         if max_history_events < 1:
             raise ValueError("max_history_events must be at least 1")
