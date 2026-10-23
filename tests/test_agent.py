@@ -74,6 +74,58 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.context.events[1].type, "user")
         self.assertEqual(self.agent.context.events[2].type, "assistant")
 
+    async def test_act_preserves_success_when_sibling_call_raises(self):
+        await self.agent._ensure_tool_definitions()
+        successful = ToolCall(
+            id="call-ok",
+            name="search_web",
+            arguments={"query": "good"},
+        )
+        failing = ToolCall(
+            id="call-fail",
+            name="search_web",
+            arguments={"query": "bad"},
+        )
+
+        async def execute(call):
+            if call.id == "call-fail":
+                raise RuntimeError("unexpected internal failure")
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content="successful result",
+                is_error=False,
+            )
+
+        self.agent._run_tool_call = execute
+        results = await self.agent.act(
+            self.agent.context, [successful, failing]
+        )
+
+        self.assertEqual([result.tool_call_id for result in results], [
+            "call-ok", "call-fail"
+        ])
+        self.assertEqual(results[0].content, "successful result")
+        self.assertFalse(results[0].is_error)
+        self.assertTrue(results[1].is_error)
+        self.assertIn("Tool execution failed", results[1].content)
+
+    async def test_malformed_tool_call_is_rejected_without_execution(self):
+        """A parse failure from the model must never invoke the MCP tool."""
+        await self.agent._ensure_tool_definitions()
+        result = await self.agent._run_tool_call(
+            ToolCall(
+                id="call-bad",
+                name="search_web",
+                arguments={},
+                parse_error="Tool arguments were not valid JSON",
+            )
+        )
+
+        self.assertTrue(result.is_error)
+        self.assertIn("not valid JSON", result.content)
+        self.mcp_session.call_tool.assert_not_awaited()
+
     async def test_run_executes_tool_and_returns_follow_up_answer(self):
         self.llm_client.complete.side_effect = [
             LlmResponse(
@@ -276,6 +328,39 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
                 tool_timeout=0,
             )
 
+    async def test_constructor_rejects_non_finite_tool_timeout(self):
+        for timeout in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    Agent(
+                        llm_client=self.llm_client,
+                        mcp_session=self.mcp_session,
+                        tool_timeout=timeout,
+                    )
+
+    async def test_cancelled_tool_execution_propagates_cancellation(self):
+        started = asyncio.Event()
+
+        async def slow_tool(*args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        self.mcp_session.call_tool.side_effect = slow_tool
+        task = asyncio.create_task(
+            self.agent._execute_tool(
+                ToolCall(
+                    id="call-cancel",
+                    name="search_web",
+                    arguments={"query": "MCP"},
+                )
+            )
+        )
+        await started.wait()
+        task.cancel()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
     async def test_constructor_rejects_invalid_max_history_events(self):
         with self.assertRaises(ValueError):
             Agent(
@@ -382,6 +467,48 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             self.agent._normalize_tool_result(result),
             "First line\nSecond line",
         )
+
+    async def test_tool_result_is_truncated_within_character_limit(self):
+        from app.agent import MAX_TOOL_RESULT_CHARS
+
+        result = SimpleNamespace(content="x" * (MAX_TOOL_RESULT_CHARS + 500))
+
+        normalized = self.agent._normalize_tool_result(result)
+
+        self.assertLessEqual(len(normalized), MAX_TOOL_RESULT_CHARS)
+        self.assertIn("[truncated:", normalized)
+        self.assertTrue(normalized.startswith("x"))
+
+    async def test_tool_argument_values_are_not_logged(self):
+        await self.agent._ensure_tool_definitions()
+        with self.assertLogs("app.agent", level="DEBUG") as captured:
+            await self.agent._run_tool_call(
+                ToolCall(
+                    id="call-private",
+                    name="search_web",
+                    arguments={"query": "secret-search-term"},
+                )
+            )
+
+        logs = "\\n".join(captured.output)
+        self.assertIn("argument_names=['query']", logs)
+        self.assertNotIn("secret-search-term", logs)
+
+    async def test_invalid_tool_argument_values_are_not_logged(self):
+        await self.agent._ensure_tool_definitions()
+        with self.assertLogs("app.agent", level="WARNING") as captured:
+            result = await self.agent._run_tool_call(
+                ToolCall(
+                    id="call-invalid-private",
+                    name="search_web",
+                    arguments={"query": {"token": "secret-invalid-value"}},
+                )
+            )
+
+        self.assertTrue(result.is_error)
+        logs = "\\n".join(captured.output)
+        self.assertIn("ValidationError", logs)
+        self.assertNotIn("secret-invalid-value", logs)
 
     async def test_tool_definitions_with_missing_schema(self):
         self.mcp_session.list_tools.return_value = SimpleNamespace(

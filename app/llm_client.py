@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -50,6 +51,7 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    parse_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -91,8 +93,10 @@ class LlmClient:
         if not 0.0 <= temperature <= 2.0:
             raise ValueError("temperature must be between 0 and 2")
 
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than 0")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(
+                "timeout must be a finite number greater than zero"
+            )
 
         if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
@@ -308,6 +312,7 @@ class LlmClient:
                     call_id,
                 )
 
+            parse_error: str | None = None
             if isinstance(raw_arguments, dict):
                 arguments = raw_arguments
             elif isinstance(raw_arguments, str):
@@ -315,31 +320,37 @@ class LlmClient:
                     parsed_arguments = json.loads(raw_arguments or "{}")
                 except json.JSONDecodeError:
                     logger.warning(
-                        "Tool %r returned invalid JSON arguments: %r",
+                        "Tool %r returned invalid JSON arguments",
                         name,
-                        raw_arguments,
                     )
-                    parsed_arguments = {}
+                    parsed_arguments = None
+                    parse_error = "Tool arguments were not valid JSON"
 
-                if not isinstance(parsed_arguments, dict):
+                if parse_error is None and not isinstance(parsed_arguments, dict):
                     logger.warning(
-                        "Tool %r arguments were not a JSON object: %r",
+                        "Tool %r arguments were not a JSON object",
                         name,
-                        parsed_arguments,
                     )
-                    parsed_arguments = {}
+                    parse_error = "Tool arguments must be a JSON object"
+                    parsed_arguments = None
 
-                arguments = parsed_arguments
+                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {}
             else:
                 logger.warning(
-                    "Tool %r returned unsupported argument type: %r",
+                    "Tool %r returned unsupported argument type: %s",
                     name,
-                    type(raw_arguments),
+                    type(raw_arguments).__name__,
                 )
                 arguments = {}
+                parse_error = "Tool arguments have an unsupported type"
 
             content.append(
-                ToolCall(id=call_id, name=name, arguments=arguments)
+                ToolCall(
+                    id=call_id,
+                    name=name,
+                    arguments=arguments,
+                    parse_error=parse_error,
+                )
             )
 
         if not content:

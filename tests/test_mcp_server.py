@@ -60,6 +60,20 @@ class TestSearchWeb(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(call_count, 3)
 
+    async def test_search_failure_does_not_expose_provider_error(self):
+        """Provider details should not leak through the MCP tool error."""
+        with patch("tools.mcp_server.DDGS") as mock_ddgs:
+            mock_instance = MagicMock()
+            mock_instance.text.side_effect = RuntimeError("private provider detail")
+            mock_ddgs.return_value.__enter__.return_value = mock_instance
+
+            with patch("tools.mcp_server._sleep", new=AsyncMock()):
+                with self.assertRaises(RuntimeError) as raised:
+                    await search_web("test query", max_results=1)
+
+        self.assertNotIn("private provider detail", str(raised.exception))
+        self.assertIn("temporarily unavailable", str(raised.exception))
+
     def test_max_results_declares_schema_bounds(self):
         """The signature must expose 1 <= max_results <= 10."""
         hints = get_type_hints(search_web, include_extras=True)

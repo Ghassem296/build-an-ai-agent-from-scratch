@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json  # ← [4.7] برای تبدیل آرگومان‌های ابزار ساختاریافته
+import math
 import logging
 from typing import Any, Optional, Type  # ← [4.7] Optional و Type
 from uuid import uuid4
@@ -73,8 +74,10 @@ class Agent:
         system_prompt: str | None = None,
         output_type: Optional[Type[BaseModel]] = None,  # ← [4.7] پارامتر جدید
     ) -> None:
-        if tool_timeout <= 0:
-            raise ValueError("tool_timeout must be greater than zero")
+        if not math.isfinite(tool_timeout) or tool_timeout <= 0:
+            raise ValueError(
+                "tool_timeout must be a finite number greater than zero"
+            )
 
         if max_history_events < 1:
             raise ValueError("max_history_events must be at least 1")
@@ -294,13 +297,30 @@ class Agent:
                 f"got {self.output_type!r}"
             )
 
+        # "final_answer" is an internal tool name. If an MCP server
+        # advertises the same name, silently overriding its schema would
+        # create duplicate tool definitions and route its calls internally.
+        if "final_answer" in self._allowed_tools:
+            raise ValueError(
+                "MCP server tool name 'final_answer' is reserved when "
+                "structured output is enabled"
+            )
+
         schema = self.output_type.model_json_schema()
 
-        # پاکسازی اسکیما برای سازگاری با Tool Format
-        schema.pop("$defs", None)
-        schema.pop("title", None)
-        for prop in schema.get("properties", {}).values():
-            prop.pop("title", None)
+        # Keep $defs: nested Pydantic models refer to these definitions through
+        # local $ref values. Removing $defs leaves dangling references and
+        # makes otherwise valid tool schemas impossible to validate.
+        def strip_titles(value: Any) -> None:
+            if isinstance(value, dict):
+                value.pop("title", None)
+                for nested in value.values():
+                    strip_titles(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    strip_titles(nested)
+
+        strip_titles(schema)
 
         self.output_tool_name = "final_answer"
         self._allowed_tools.add("final_answer")
@@ -470,14 +490,49 @@ class Agent:
         if not tool_calls:
             return []
 
+        async def run_safely(tool_call: ToolCall) -> ToolResult:
+            try:
+                return await self._run_tool_call(tool_call)
+            except asyncio.CancelledError:
+                # Preserve caller cancellation; do not disguise it as a tool error.
+                raise
+            except Exception:
+                logger.exception(
+                    "Unexpected failure while processing tool call %s",
+                    tool_call.name,
+                )
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    content=(
+                        "Tool execution failed. "
+                        "Please try a different approach."
+                    ),
+                    is_error=True,
+                )
+
+        # Isolate failures per call so one malformed schema or unexpected
+        # exception does not discard the results of sibling tool calls.
         return list(
             await asyncio.gather(
-                *(self._run_tool_call(call) for call in tool_calls)
+                *(run_safely(call) for call in tool_calls)
             )
         )
 
     async def _run_tool_call(self, tool_call: ToolCall) -> ToolResult:
         """Validate and execute a single tool call."""
+        if tool_call.parse_error is not None:
+            logger.warning(
+                "Rejected tool %r because its arguments could not be parsed",
+                tool_call.name,
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=tool_call.parse_error,
+                is_error=True,
+            )
+
         if tool_call.name not in self._allowed_tools:
             logger.warning(
                 "Rejected unknown tool %r (allowed: %s)",
@@ -506,10 +561,13 @@ class Agent:
                 jsonschema.ValidationError,
                 jsonschema.exceptions.SchemaError,
             ) as exc:
+                # Validation messages can include the rejected value itself.
+                # Keep logs diagnostic without recording potentially sensitive
+                # tool arguments.
                 logger.warning(
-                    "Invalid arguments for tool %r: %s",
+                    "Invalid arguments for tool %r (%s)",
                     tool_call.name,
-                    exc.message,
+                    type(exc).__name__,
                 )
                 return ToolResult(
                     tool_call_id=tool_call.id,
@@ -521,10 +579,17 @@ class Agent:
                     is_error=True,
                 )
 
+        # Tool arguments may contain user data, credentials, or other
+        # sensitive values. Log only the argument names, never raw values.
+        argument_names = (
+            sorted(tool_call.arguments)
+            if isinstance(tool_call.arguments, dict)
+            else []
+        )
         logger.debug(
-            "LLM requested MCP tool: %s; arguments=%s",
+            "LLM requested MCP tool: %s; argument_names=%s",
             tool_call.name,
-            tool_call.arguments,
+            argument_names,
         )
 
         result = await self._execute_tool(tool_call)
@@ -651,16 +716,18 @@ class Agent:
             normalized = "\n".join(parts)
 
         if len(normalized) > MAX_TOOL_RESULT_CHARS:
-            logger.warning(
-                "Tool result truncated from %d to %d characters",
-                len(normalized),
-                MAX_TOOL_RESULT_CHARS,
-            )
-            normalized = (
-                normalized[:MAX_TOOL_RESULT_CHARS]
-                + f"\n\n[truncated: {len(normalized) - MAX_TOOL_RESULT_CHARS} "
-                f"characters omitted]"
-            )
+            original_length = len(normalized)
+            suffix = f"\n\n[truncated: {original_length} characters omitted]"
+            prefix_length = max(0, MAX_TOOL_RESULT_CHARS - len(suffix))
+            omitted = original_length - prefix_length
+            suffix = f"\n\n[truncated: {omitted} characters omitted]"
+            # Keep the marker inside the configured limit too.
+            prefix_length = max(0, MAX_TOOL_RESULT_CHARS - len(suffix))
+            omitted = original_length - prefix_length
+            suffix = f"\n\n[truncated: {omitted} characters omitted]"
+            normalized = normalized[:prefix_length] + suffix
+            if len(normalized) > MAX_TOOL_RESULT_CHARS:
+                normalized = normalized[:MAX_TOOL_RESULT_CHARS]
 
         return normalized
 
