@@ -96,6 +96,17 @@ class StructuredOutputTests(unittest.IsolatedAsyncioTestCase):
             schema["$defs"]["NestedMetadata"]["properties"]["source"],
         )
 
+    async def test_mcp_tool_name_collision_is_rejected(self):
+        """An MCP tool must not shadow the internal final_answer tool."""
+        agent = Agent(
+            MagicMock(),
+            make_mcp_session(tools=[{"name": "final_answer"}]),
+            output_type=Sentiment,
+        )
+
+        with self.assertRaisesRegex(ValueError, "reserved"):
+            await agent._ensure_tool_definitions()
+
     async def test_no_output_type_leaves_tool_name_none(self):
         """Backward compat: without output_type, no final_answer tool."""
         agent = Agent(MagicMock(), make_mcp_session())
