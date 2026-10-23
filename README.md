@@ -43,7 +43,7 @@ Jungjun Hur & Younghee Song).
   data.
 - **Minimal MCP environment** — the subprocess receives an explicit allowlist of
   environment variables, so API keys and tokens never reach it.
-- **79 tests, no network required** — the LLM and the MCP session are mocked.
+- **83 tests, no network required** — the LLM and the MCP session are mocked.
 - **CI on Linux and Windows** — Python 3.11, 3.12 and 3.13.
 
 ---
