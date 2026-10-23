@@ -494,6 +494,22 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertIn("argument_names=['query']", logs)
         self.assertNotIn("secret-search-term", logs)
 
+    async def test_invalid_tool_argument_values_are_not_logged(self):
+        await self.agent._ensure_tool_definitions()
+        with self.assertLogs("app.agent", level="WARNING") as captured:
+            result = await self.agent._run_tool_call(
+                ToolCall(
+                    id="call-invalid-private",
+                    name="search_web",
+                    arguments={"query": {"token": "secret-invalid-value"}},
+                )
+            )
+
+        self.assertTrue(result.is_error)
+        logs = "\\n".join(captured.output)
+        self.assertIn("ValidationError", logs)
+        self.assertNotIn("secret-invalid-value", logs)
+
     async def test_tool_definitions_with_missing_schema(self):
         self.mcp_session.list_tools.return_value = SimpleNamespace(
             tools=[
