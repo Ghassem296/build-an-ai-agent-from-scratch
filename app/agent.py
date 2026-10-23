@@ -294,6 +294,15 @@ class Agent:
                 f"got {self.output_type!r}"
             )
 
+        # "final_answer" is an internal tool name. If an MCP server
+        # advertises the same name, silently overriding its schema would
+        # create duplicate tool definitions and route its calls internally.
+        if "final_answer" in self._allowed_tools:
+            raise ValueError(
+                "MCP server tool name 'final_answer' is reserved when "
+                "structured output is enabled"
+            )
+
         schema = self.output_type.model_json_schema()
 
         # Keep $defs: nested Pydantic models refer to these definitions through
