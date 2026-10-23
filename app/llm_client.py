@@ -65,6 +65,8 @@ class LlmRequest:
     messages: list[Message | ToolCall | ToolResult]
     tools: list[dict[str, Any]] | None = None
     temperature: float | None = None
+    # ← [4.7] "auto" | "required" | "none" | None
+    tool_choice: str | None = None
 
 
 @dataclass(slots=True)
@@ -148,7 +150,11 @@ class LlmClient:
 
         if tool_definitions:
             payload["tools"] = tool_definitions
-            payload["tool_choice"] = "auto"
+            # ← [4.7] احترام به tool_choice درخواست؛ در غیر این صورت "auto"
+            if request.tool_choice is not None:
+                payload["tool_choice"] = request.tool_choice
+            else:
+                payload["tool_choice"] = "auto"
 
         logger.debug("Sending request to model %s", self.model)
 

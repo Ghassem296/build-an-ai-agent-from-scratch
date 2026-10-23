@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json  # ← [4.7] برای تبدیل آرگومان‌های ابزار ساختاریافته
 import logging
-from typing import Any
+from typing import Any, Optional, Type  # ← [4.7] Optional و Type
 from uuid import uuid4
 
 import jsonschema
+from pydantic import BaseModel  # ← [4.7] برای output_type
 
 from app.execution_context import ExecutionContext
 from app.llm_client import (
@@ -61,6 +63,7 @@ class Agent:
         max_history_events: int = 40,
         max_context_chars: int = 120_000,
         system_prompt: str | None = None,
+        output_type: Optional[Type[BaseModel]] = None,  # ← [4.7] پارامتر جدید
     ) -> None:
         if tool_timeout <= 0:
             raise ValueError("tool_timeout must be greater than zero")
@@ -81,6 +84,11 @@ class Agent:
             if system_prompt is not None
             else DEFAULT_SYSTEM_PROMPT
         )
+
+        # ← [4.7] وضعیت Structured Output
+        self.output_type = output_type
+        self.output_tool_name: str | None = None
+        # ← [4.7] پایان
 
         self.context: ExecutionContext | None = None
         self._allowed_tools: set[str] = set()
@@ -114,7 +122,7 @@ class Agent:
         *,
         max_steps: int = 10,
         context: ExecutionContext | None = None,
-    ) -> str:
+    ) -> str | BaseModel:  # ← [4.7] نوع بازگشتی تغییر کرد
         """Run the agent loop and return the final answer."""
         if not prompt or not prompt.strip():
             raise ValueError("prompt cannot be empty")
@@ -161,6 +169,24 @@ class Agent:
                 context,
                 tools=tool_definitions,
             )
+
+            # ← [4.7] حالت Structured Output
+            if self.output_tool_name:
+                structured = self._extract_structured_result(context)
+                if structured is not None:
+                    logger.info(
+                        "Execution %s: structured output extracted",
+                        context.execution_id,
+                    )
+                    return structured
+                # اگر هنوز final_answer صدا زده نشده، ادامه بده
+                logger.debug(
+                    "Execution %s: structured output not yet available, "
+                    "continuing loop",
+                    context.execution_id,
+                )
+                continue
+            # ← [4.7] پایان
 
             if not self._has_tool_calls(response):
                 logger.info(
@@ -233,7 +259,89 @@ class Agent:
                 }
             )
 
+        # ← [4.7] افزودن ابزار ساختاریافته final_answer
+        if self.output_type is not None:
+            self._setup_structured_output_tool()
+            if self._final_answer_tool is not None:
+                definitions.append(self._final_answer_tool)
+        # ← [4.7] پایان
+
         return definitions
+
+    def _setup_structured_output_tool(self) -> None:
+        """ساخت اسکیمای ابزار final_answer از روی مدل Pydantic.
+
+        این متد زمانی صدا زده می‌شود که ``output_type`` تعریف شده باشد.
+        """
+        # اعتبارسنجی اینکه output_type واقعاً یک مدل Pydantic است
+        if not (
+            isinstance(self.output_type, type)
+            and issubclass(self.output_type, BaseModel)
+        ):
+            raise TypeError(
+                "output_type must be a Pydantic BaseModel subclass, "
+                f"got {self.output_type!r}"
+            )
+
+        schema = self.output_type.model_json_schema()
+
+        # پاکسازی اسکیما برای سازگاری با Tool Format
+        schema.pop("$defs", None)
+        schema.pop("title", None)
+        for prop in schema.get("properties", {}).values():
+            prop.pop("title", None)
+
+        self.output_tool_name = "final_answer"
+        self._allowed_tools.add("final_answer")
+        self._tool_schemas["final_answer"] = schema
+
+        self._final_answer_tool = {
+            "type": "function",
+            "function": {
+                "name": "final_answer",
+                "description": (
+                    "Return the final structured answer matching "
+                    "the required schema. Call this tool ONLY when you "
+                    "have enough information to answer the user."
+                ),
+                "parameters": schema,
+            },
+        }
+
+    # ← [4.7] متد جدید برای استخراج خروجی ساختاریافته
+    def _extract_structured_result(
+        self, context: ExecutionContext
+    ) -> BaseModel | None:
+        """استخراج آبجکت Pydantic از آخرین فراخوانی موفق ``final_answer``.
+
+        تاریخچه رویدادها را از آخر به اول بررسی می‌کند تا جدیدترین
+        فراخوانی پیدا شود.
+        """
+        if not self.output_tool_name or not self.output_type:
+            return None
+
+        for event in reversed(context.get_events()):
+            if not isinstance(event.content, list):
+                continue
+
+            for item in event.content:
+                if (
+                    isinstance(item, ToolResult)
+                    and item.name == self.output_tool_name
+                    and not item.is_error
+                ):
+                    try:
+                        data = json.loads(item.content)
+                        return self.output_type.model_validate(data)
+                    except Exception:
+                        logger.exception(
+                            "Failed to parse structured output from "
+                            "final_answer tool result"
+                        )
+                        return None
+
+        return None
+    # ← [4.7] پایان متد جدید
 
     def _prepare_llm_request(
         self,
@@ -277,9 +385,19 @@ class Agent:
             elif isinstance(content, (Message, ToolCall, ToolResult)):
                 messages.append(content)
 
+        # ← [4.7] تعیین استراتژی انتخاب ابزار
+        if self.output_tool_name and tools:
+            tool_choice: str | None = "required"
+        elif tools:
+            tool_choice = "auto"
+        else:
+            tool_choice = None
+        # ← [4.7] پایان
+
         return LlmRequest(
             messages=messages,
             tools=tools or [],
+            tool_choice=tool_choice,  # ← [4.7] پاس دادن به LlmRequest
         )
 
     async def think(self, request: LlmRequest) -> LlmResponse:
@@ -409,6 +527,19 @@ class Agent:
 
     async def _execute_tool(self, tool_call: ToolCall) -> ToolResult:
         """Execute one MCP tool call and normalize its result."""
+        # ← [4.7] رهگیری ابزار ساختاریافته (به MCP نمی‌رود)
+        if self.output_tool_name and tool_call.name == self.output_tool_name:
+            logger.info("Structured final_answer called by LLM")
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=json.dumps(
+                    tool_call.arguments, ensure_ascii=False
+                ),
+                is_error=False,
+            )
+        # ← [4.7] پایان
+
         logger.info(
             "Calling MCP tool %s",
             tool_call.name,
@@ -556,6 +687,10 @@ class Agent:
     ) -> str:
         """Request a final response without allowing additional tool calls."""
         request = self._prepare_llm_request(context, tools=[])
+
+        # ← [4.7] هیچ ابزاری در دسترس نیست، پس tool_choice را None کن
+        request.tool_choice = None
+        # ← [4.7] پایان
 
         request.messages = self._with_step_limit_note(request.messages)
 
