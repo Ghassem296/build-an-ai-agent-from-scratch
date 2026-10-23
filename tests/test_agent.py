@@ -74,6 +74,22 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.context.events[1].type, "user")
         self.assertEqual(self.agent.context.events[2].type, "assistant")
 
+    async def test_malformed_tool_call_is_rejected_without_execution(self):
+        """A parse failure from the model must never invoke the MCP tool."""
+        await self.agent._ensure_tool_definitions()
+        result = await self.agent._run_tool_call(
+            ToolCall(
+                id="call-bad",
+                name="search_web",
+                arguments={},
+                parse_error="Tool arguments were not valid JSON",
+            )
+        )
+
+        self.assertTrue(result.is_error)
+        self.assertIn("not valid JSON", result.content)
+        self.mcp_session.call_tool.assert_not_awaited()
+
     async def test_run_executes_tool_and_returns_follow_up_answer(self):
         self.llm_client.complete.side_effect = [
             LlmResponse(
