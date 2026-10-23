@@ -30,7 +30,7 @@ jobs:
           - os: ubuntu-latest
             python-version: "3.13"
           - os: windows-latest
-            python-version: "3.12"
+            python-version: "3.13"
 
     steps:
       - name: Checkout repository
@@ -47,8 +47,8 @@ jobs:
           enable-cache: true
 
       # --python makes the matrix authoritative. Without it, uv prefers the
-      # version pinned in .python-version (3.12) and every job would silently
-      # run on 3.12, so the 3.11/3.13 coverage would be fictional.
+      # version pinned in .python-version, so every job could run on 3.13
+      # instead of the Python version selected by the matrix.
       - name: Install dependencies
         run: uv sync --python ${{ matrix.python-version }} --all-extras --dev
 
