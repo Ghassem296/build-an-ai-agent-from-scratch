@@ -292,6 +292,39 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
                 tool_timeout=0,
             )
 
+    async def test_constructor_rejects_non_finite_tool_timeout(self):
+        for timeout in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    Agent(
+                        llm_client=self.llm_client,
+                        mcp_session=self.mcp_session,
+                        tool_timeout=timeout,
+                    )
+
+    async def test_cancelled_tool_execution_propagates_cancellation(self):
+        started = asyncio.Event()
+
+        async def slow_tool(*args, **kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        self.mcp_session.call_tool.side_effect = slow_tool
+        task = asyncio.create_task(
+            self.agent._execute_tool(
+                ToolCall(
+                    id="call-cancel",
+                    name="search_web",
+                    arguments={"query": "MCP"},
+                )
+            )
+        )
+        await started.wait()
+        task.cancel()
+
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+
     async def test_constructor_rejects_invalid_max_history_events(self):
         with self.assertRaises(ValueError):
             Agent(
