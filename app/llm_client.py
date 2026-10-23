@@ -2,6 +2,7 @@
 
 import json
 import logging
+import math
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -92,8 +93,10 @@ class LlmClient:
         if not 0.0 <= temperature <= 2.0:
             raise ValueError("temperature must be between 0 and 2")
 
-        if timeout <= 0:
-            raise ValueError("timeout must be greater than 0")
+        if not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError(
+                "timeout must be a finite number greater than zero"
+            )
 
         if max_retries < 0:
             raise ValueError("max_retries cannot be negative")
