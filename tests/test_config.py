@@ -10,7 +10,7 @@ class TestSettings(unittest.TestCase):
     def test_default_values(self):
         settings = Settings.from_env()
 
-        self.assertEqual(settings.llm_model, "openai/gemini-2.5-flash")
+        self.assertEqual(settings.llm_model, "gemini/gemini-2.5-flash")
         self.assertEqual(settings.llm_temperature, 0.0)
         self.assertEqual(settings.llm_timeout, 60.0)
         self.assertEqual(settings.tool_timeout, 30.0)
@@ -54,6 +54,19 @@ class TestSettings(unittest.TestCase):
     def test_non_integer_max_steps_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "AGENT_MAX_STEPS"):
             Settings.from_env()
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_is_rejected_by_shared_validator(self):
+        from app.config import require_api_key
+
+        with self.assertRaisesRegex(RuntimeError, "No API key found"):
+            require_api_key(Settings.from_env())
+
+    @patch.dict("os.environ", {"LLM_API_KEY": "test-key"}, clear=True)
+    def test_configured_api_key_passes_shared_validator(self):
+        from app.config import require_api_key
+
+        require_api_key(Settings.from_env())
 
     @patch.dict("os.environ", {"LLM_API_KEY": "test-key"}, clear=True)
     def test_api_key_is_loaded(self):

@@ -82,7 +82,7 @@ class LlmResponse:
 class LlmClient:
     def __init__(
         self,
-        model: str = "openai/gemini-2.5-flash",
+        model: str = "gemini/gemini-2.5-flash",
         api_key: str | None = None,
         api_base: str | None = None,
         temperature: float = 0.0,

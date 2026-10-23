@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 
 from app.agent import Agent
-from app.config import get_settings
+from app.config import get_settings, require_api_key
 from app.llm_client import LlmClient
 from app.mcp_runtime import mcp_session
 
@@ -49,11 +49,7 @@ async def main() -> None:
     """Connect to the MCP server and run the demo prompt."""
     settings = get_settings()
 
-    if not settings.llm_api_key:
-        raise RuntimeError(
-            "No API key found. Set LLM_API_KEY or XAI_1_API_KEY "
-            "in the project's .env file."
-        )
+    require_api_key(settings)
 
     async with mcp_session(PROJECT_DIR) as session:
         tools_result = await session.list_tools()

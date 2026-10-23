@@ -64,7 +64,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         model = os.getenv(
             "LLM_MODEL",
-            "openai/gemini-2.5-flash",
+            "gemini/gemini-2.5-flash",
         ).strip()
 
         if not model:
@@ -123,6 +123,15 @@ class Settings:
             agent_max_context_chars=max_context_chars,
             tool_timeout=tool_timeout,
             log_level=log_level,
+        )
+
+
+def require_api_key(settings: Settings) -> None:
+    """Fail early with a clear message when no provider API key is configured."""
+    if not settings.llm_api_key:
+        raise RuntimeError(
+            "No API key found. Set LLM_API_KEY or XAI_1_API_KEY "
+            "in the project .env file."
         )
 
 
