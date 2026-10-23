@@ -10,7 +10,7 @@ class TestSettings(unittest.TestCase):
     def test_default_values(self):
         settings = Settings.from_env()
 
-        self.assertEqual(settings.llm_model, "openai/gemini-2.5-flash")
+        self.assertEqual(settings.llm_model, "gemini/gemini-2.5-flash")
         self.assertEqual(settings.llm_temperature, 0.0)
         self.assertEqual(settings.llm_timeout, 60.0)
         self.assertEqual(settings.tool_timeout, 30.0)
