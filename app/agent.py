@@ -495,6 +495,18 @@ class Agent:
 
     async def _run_tool_call(self, tool_call: ToolCall) -> ToolResult:
         """Validate and execute a single tool call."""
+        if tool_call.parse_error is not None:
+            logger.warning(
+                "Rejected tool %r because its arguments could not be parsed",
+                tool_call.name,
+            )
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=tool_call.parse_error,
+                is_error=True,
+            )
+
         if tool_call.name not in self._allowed_tools:
             logger.warning(
                 "Rejected unknown tool %r (allowed: %s)",
