@@ -44,6 +44,14 @@ STEP_LIMIT_NOTE = (
 )
 
 
+STRUCTURED_STEP_LIMIT_NOTE = (
+    "The tool-use step limit has been reached. "
+    "Do not call any tool except final_answer. "
+    "Call final_answer now with the best answer you can give from the "
+    "information already available."
+)
+
+
 EMPTY_ANSWER_MESSAGE = (
     "The model returned an empty answer. Please try rephrasing your question."
 )
@@ -218,6 +226,9 @@ class Agent:
             context.execution_id,
             max_steps,
         )
+
+        if self.output_tool_name:
+            return await self._request_structured_final_answer(context)
 
         return await self._request_final_answer(context)
 
@@ -667,6 +678,7 @@ class Agent:
     @staticmethod
     def _with_step_limit_note(
         messages: list[Message | ToolCall | ToolResult],
+        note: str = STEP_LIMIT_NOTE,
     ) -> list[Message | ToolCall | ToolResult]:
         """Add the step-limit instruction without duplicating system prompts.
 
@@ -678,9 +690,9 @@ class Agent:
         for index, item in enumerate(messages):
             if isinstance(item, Message) and item.role == "system":
                 content = (
-                    f"{item.content}\n\n{STEP_LIMIT_NOTE}"
+                    f"{item.content}\n\n{note}"
                     if item.content
-                    else STEP_LIMIT_NOTE
+                    else note
                 )
 
                 updated = list(messages)
@@ -688,7 +700,7 @@ class Agent:
 
                 return updated
 
-        return [Message(role="system", content=STEP_LIMIT_NOTE), *messages]
+        return [Message(role="system", content=note), *messages]
 
     async def _request_final_answer(
         self,
@@ -728,4 +740,62 @@ class Agent:
         return (
             "The maximum number of tool-use steps was reached, "
             "and the model did not return a textual final answer."
+        )
+
+    async def _request_structured_final_answer(
+        self,
+        context: ExecutionContext,
+    ) -> BaseModel:
+        """Force one last ``final_answer`` call when the step limit is hit.
+
+        Only the ``final_answer`` tool is offered, so the model cannot start
+        another search. If it still does not produce a valid structured
+        answer, raise instead of returning free text: callers of an agent
+        with ``output_type`` expect a model instance, never a ``str``.
+        """
+        final_tool = self._final_answer_tool
+
+        request = self._prepare_llm_request(context, tools=[final_tool])
+        request.messages = self._with_step_limit_note(
+            request.messages,
+            STRUCTURED_STEP_LIMIT_NOTE,
+        )
+
+        response = await self.think(request)
+        context.create_event("assistant", response.content)
+
+        tool_calls = [
+            item
+            for item in response.content
+            if isinstance(item, ToolCall)
+        ]
+        answer_calls = [
+            call for call in tool_calls if call.name == self.output_tool_name
+        ]
+
+        if tool_calls:
+            results = await self.act(context, answer_calls)
+
+            # Every tool call needs a result, or the stored history would be
+            # invalid if the caller reuses the context.
+            results.extend(
+                ToolResult(
+                    tool_call_id=call.id,
+                    name=call.name,
+                    content="Step limit reached; this tool was not executed.",
+                    is_error=True,
+                )
+                for call in tool_calls
+                if call.name != self.output_tool_name
+            )
+            context.create_event("tool", results)
+
+            structured = self._extract_structured_result(context)
+
+            if structured is not None:
+                return structured
+
+        raise RuntimeError(
+            "The maximum number of tool-use steps was reached, and the "
+            "model did not return a valid structured answer."
         )

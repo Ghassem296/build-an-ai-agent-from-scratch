@@ -259,6 +259,91 @@ class StructuredOutputTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(llm.complete.await_count, 3)
         session.call_tool.assert_awaited_once()
 
+    @staticmethod
+    def _search_session():
+        from types import SimpleNamespace
+
+        session = make_mcp_session(tools=[
+            {
+                "name": "search_web",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ])
+        session.call_tool = AsyncMock(
+            return_value=SimpleNamespace(
+                content=[SimpleNamespace(text="found it")],
+                isError=False,
+            )
+        )
+        return session
+
+    async def test_step_limit_forces_structured_final_answer(self):
+        """At max_steps the agent must still return a Pydantic object.
+
+        The last request may offer only final_answer, so the model cannot
+        start another search.
+        """
+        llm = MagicMock()
+        llm.complete = AsyncMock(side_effect=[
+            make_llm_response([
+                ToolCall(
+                    id="s1",
+                    name="search_web",
+                    arguments={"query": "reviews"},
+                )
+            ]),
+            make_llm_response([
+                ToolCall(
+                    id="s2",
+                    name="final_answer",
+                    arguments={"sentiment": "neutral", "confidence": 0.5},
+                )
+            ]),
+        ])
+
+        agent = Agent(llm, self._search_session(), output_type=Sentiment)
+        result = await agent.run("How is it?", max_steps=1)
+
+        self.assertIsInstance(result, Sentiment)
+        self.assertEqual(result.sentiment, "neutral")
+        self.assertEqual(llm.complete.await_count, 2)
+
+        forced = llm.complete.await_args_list[1].args[0]
+        names = [t["function"]["name"] for t in forced.tools]
+        self.assertEqual(names, ["final_answer"])
+        self.assertEqual(forced.tool_choice, "required")
+
+        system = next(
+            m for m in forced.messages
+            if isinstance(m, Message) and m.role == "system"
+        )
+        self.assertIn("step limit", system.content)
+
+    async def test_step_limit_without_valid_answer_raises(self):
+        """No valid structured answer at the limit must not return text."""
+        llm = MagicMock()
+        llm.complete = AsyncMock(side_effect=[
+            make_llm_response([
+                ToolCall(
+                    id="s1",
+                    name="search_web",
+                    arguments={"query": "reviews"},
+                )
+            ]),
+            make_llm_response([
+                Message(role="assistant", content="I give up")
+            ]),
+        ])
+
+        agent = Agent(llm, self._search_session(), output_type=Sentiment)
+
+        with self.assertRaises(RuntimeError):
+            await agent.run("How is it?", max_steps=1)
+
 
 if __name__ == "__main__":
     unittest.main()
