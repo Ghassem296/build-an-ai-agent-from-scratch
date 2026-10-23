@@ -490,9 +490,32 @@ class Agent:
         if not tool_calls:
             return []
 
+        async def run_safely(tool_call: ToolCall) -> ToolResult:
+            try:
+                return await self._run_tool_call(tool_call)
+            except asyncio.CancelledError:
+                # Preserve caller cancellation; do not disguise it as a tool error.
+                raise
+            except Exception:
+                logger.exception(
+                    "Unexpected failure while processing tool call %s",
+                    tool_call.name,
+                )
+                return ToolResult(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    content=(
+                        "Tool execution failed. "
+                        "Please try a different approach."
+                    ),
+                    is_error=True,
+                )
+
+        # Isolate failures per call so one malformed schema or unexpected
+        # exception does not discard the results of sibling tool calls.
         return list(
             await asyncio.gather(
-                *(self._run_tool_call(call) for call in tool_calls)
+                *(run_safely(call) for call in tool_calls)
             )
         )
 
