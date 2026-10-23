@@ -249,6 +249,34 @@ class TestExecutionContext(unittest.TestCase):
         self.assertEqual(context.events[1].content[0].content, "q1")
 
 
+    def test_new_user_message_starts_new_turn_after_tool_result(self):
+        """A later user turn must not be grouped with an unfinished old turn."""
+        context = ExecutionContext()
+        context.create_event("system", "sys")
+        context.create_event("user", [Message(role="user", content="old question")])
+        context.create_event(
+            "assistant",
+            [ToolCall(id="c1", name="search_web", arguments={"query": "x"})],
+        )
+        context.create_event(
+            "tool",
+            [ToolResult(tool_call_id="c1", name="search_web", content="result")],
+        )
+        context.create_event("user", [Message(role="user", content="new question")])
+        context.create_event(
+            "assistant",
+            [Message(role="assistant", content="new answer")],
+        )
+
+        context.truncate_history(max_events=3, keep_system=True)
+
+        self.assertEqual(
+            [event.type for event in context.events],
+            ["system", "user", "assistant"],
+        )
+        self.assertEqual(context.events[1].content[0].content, "new question")
+        self.assertEqual(context.events[2].content[0].content, "new answer")
+
     def test_total_chars_and_drop_oldest_turn(self):
         """The char budget helper must drop only the oldest turn."""
         context = ExecutionContext()
