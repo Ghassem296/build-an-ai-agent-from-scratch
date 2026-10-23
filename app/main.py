@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from app.agent import Agent
-from app.config import get_settings
+from app.config import get_settings, require_api_key
 from app.execution_context import ExecutionContext
 from app.llm_client import LlmClient
 from app.mcp_runtime import mcp_session
@@ -135,6 +135,7 @@ async def interactive_loop() -> None:
 
 async def async_main() -> None:
     args = parse_args()
+    require_api_key(get_settings())
     prompt = " ".join(args.prompt).strip()
 
     if prompt:
