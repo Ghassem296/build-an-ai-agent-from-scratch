@@ -43,7 +43,7 @@ Jungjun Hur & Younghee Song).
   data.
 - **Minimal MCP environment** — the subprocess receives an explicit allowlist of
   environment variables, so API keys and tokens never reach it.
-- **83 tests, no network required** — the LLM and the MCP session are mocked.
+- **94 tests, no network required** — the LLM and the MCP session are mocked.
 - **CI on Linux and Windows** — Python 3.11, 3.12 and 3.13.
 
 ---
@@ -129,6 +129,15 @@ uv run python mcp_agent.py
 Quick connectivity checks live in `examples/`: `api_connection_check.py`,
 `web_search_check.py`, `mcp_client.py`, `tool_schema_example.py` and
 `legacy_agent_demo.py` (the pre-refactor single-file loop, kept for comparison).
+
+GAIA evaluation (book section 4.8) reads problems from a local JSON/JSONL file
+with the keys `task_id`, `Question` and `Final answer`. A real run spends API
+tokens, so start small:
+
+```bash
+uv run python -m examples.gaia_agent_eval problems.jsonl --limit 2
+uv run python -m examples.gaia_agent_eval problems.jsonl --no-tools   # baseline
+```
 
 ---
 
