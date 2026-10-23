@@ -468,6 +468,31 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
             "First line\nSecond line",
         )
 
+    async def test_tool_result_is_truncated_within_character_limit(self):
+        from app.agent import MAX_TOOL_RESULT_CHARS
+
+        result = SimpleNamespace(content="x" * (MAX_TOOL_RESULT_CHARS + 500))
+
+        normalized = self.agent._normalize_tool_result(result)
+
+        self.assertLessEqual(len(normalized), MAX_TOOL_RESULT_CHARS)
+        self.assertIn("[truncated:", normalized)
+        self.assertTrue(normalized.startswith("x"))
+
+    async def test_tool_argument_values_are_not_logged(self):
+        with self.assertLogs("app.agent", level="DEBUG") as captured:
+            await self.agent._run_tool_call(
+                ToolCall(
+                    id="call-private",
+                    name="search_web",
+                    arguments={"query": "secret-search-term"},
+                )
+            )
+
+        logs = "\\n".join(captured.output)
+        self.assertIn("argument_names=['query']", logs)
+        self.assertNotIn("secret-search-term", logs)
+
     async def test_tool_definitions_with_missing_schema(self):
         self.mcp_session.list_tools.return_value = SimpleNamespace(
             tools=[
