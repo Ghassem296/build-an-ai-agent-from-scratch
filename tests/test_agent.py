@@ -480,6 +480,7 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(normalized.startswith("x"))
 
     async def test_tool_argument_values_are_not_logged(self):
+        await self.agent._ensure_tool_definitions()
         with self.assertLogs("app.agent", level="DEBUG") as captured:
             await self.agent._run_tool_call(
                 ToolCall(
