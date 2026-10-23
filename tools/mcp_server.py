@@ -88,9 +88,11 @@ async def search_web(
         max_attempts,
         last_error,
     )
+    # Keep provider/network details in server logs, not in the tool result
+    # returned to the model or exposed to downstream callers.
     raise RuntimeError(
-        f"Web search failed after {max_attempts} attempts: {last_error}"
-    )
+        "Web search is temporarily unavailable. Please try again later."
+    ) from None
 
 
 if __name__ == "__main__":
