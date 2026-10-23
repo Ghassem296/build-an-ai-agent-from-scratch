@@ -43,8 +43,8 @@ Jungjun Hur & Younghee Song).
   data.
 - **Minimal MCP environment** — the subprocess receives an explicit allowlist of
   environment variables, so API keys and tokens never reach it.
-- **94 tests, no network required** — the LLM and the MCP session are mocked.
-- **CI on Linux and Windows** — Python 3.11, 3.12 and 3.13.
+- **Offline automated tests** — the LLM and MCP session are mocked, so the suite does not require API calls.
+- **CI matrix** — Python 3.11, 3.12 and 3.13 on Ubuntu; Python 3.13 on Windows.
 
 ---
 
@@ -88,7 +88,7 @@ All settings are read from the environment (`.env` is loaded automatically).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_MODEL` | `openai/gemini-2.5-flash` | Model string in LiteLLM format. The `openai/` prefix means "OpenAI-compatible endpoint". |
+| `LLM_MODEL` | `gemini/gemini-2.5-flash` | LiteLLM model identifier; the default uses LiteLLM's native Gemini provider. |
 | `LLM_API_KEY` | — | **Required.** Provider key. |
 | `LLM_API_BASE` | — | Optional OpenAI-compatible base URL (proxy, gateway, self-hosted). Leave empty for official APIs. |
 | `XAI_1_API_KEY` | — | Deprecated alias for `LLM_API_KEY`. |
@@ -99,9 +99,9 @@ All settings are read from the environment (`.env` is loaded automatically).
 | `TOOL_TIMEOUT` | `30` | Seconds per tool call. |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
 
-> **Note on `LLM_API_BASE`.** The example file points at a third-party
-> OpenAI-compatible gateway (`https://1xai.ir/v1`). Remove it if you call a
-> provider's official endpoint directly.
+> **Note on `LLM_API_BASE`.** Leave this empty when using the default Gemini
+> provider. Set it only when using an OpenAI-compatible gateway or a
+> self-hosted endpoint, and choose a model identifier compatible with that endpoint.
 
 ---
 
