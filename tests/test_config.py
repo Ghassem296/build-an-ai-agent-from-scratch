@@ -55,6 +55,19 @@ class TestSettings(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "AGENT_MAX_STEPS"):
             Settings.from_env()
 
+    @patch.dict("os.environ", {}, clear=True)
+    def test_missing_api_key_is_rejected_by_shared_validator(self):
+        from app.config import require_api_key
+
+        with self.assertRaisesRegex(RuntimeError, "No API key found"):
+            require_api_key(Settings.from_env())
+
+    @patch.dict("os.environ", {"LLM_API_KEY": "test-key"}, clear=True)
+    def test_configured_api_key_passes_shared_validator(self):
+        from app.config import require_api_key
+
+        require_api_key(Settings.from_env())
+
     @patch.dict("os.environ", {"LLM_API_KEY": "test-key"}, clear=True)
     def test_api_key_is_loaded(self):
         settings = Settings.from_env()
