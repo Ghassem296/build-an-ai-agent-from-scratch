@@ -97,6 +97,13 @@ class ExecutionContext:
         current_turn: list[Event] = []
 
         for event in non_system:
+            # A new user message starts a new turn even if the previous
+            # turn ended with a tool result (for example, structured output)
+            # and therefore has no final assistant text event.
+            if event.type == "user" and current_turn:
+                turns.append(current_turn)
+                current_turn = []
+
             current_turn.append(event)
 
             if event.type == "assistant" and not _contains_tool_call(
@@ -169,6 +176,13 @@ class ExecutionContext:
         current_turn: list[Event] = []
 
         for event in non_system:
+            # A new user message starts a new turn even if the previous
+            # turn ended with a tool result (for example, structured output)
+            # and therefore has no final assistant text event.
+            if event.type == "user" and current_turn:
+                turns.append(current_turn)
+                current_turn = []
+
             current_turn.append(event)
 
             if event.type == "assistant" and not _contains_tool_call(
