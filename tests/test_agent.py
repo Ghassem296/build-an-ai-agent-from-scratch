@@ -74,6 +74,42 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.agent.context.events[1].type, "user")
         self.assertEqual(self.agent.context.events[2].type, "assistant")
 
+    async def test_act_preserves_success_when_sibling_call_raises(self):
+        await self.agent._ensure_tool_definitions()
+        successful = ToolCall(
+            id="call-ok",
+            name="search_web",
+            arguments={"query": "good"},
+        )
+        failing = ToolCall(
+            id="call-fail",
+            name="search_web",
+            arguments={"query": "bad"},
+        )
+
+        async def execute(call):
+            if call.id == "call-fail":
+                raise RuntimeError("unexpected internal failure")
+            return ToolResult(
+                tool_call_id=call.id,
+                name=call.name,
+                content="successful result",
+                is_error=False,
+            )
+
+        self.agent._run_tool_call = execute
+        results = await self.agent.act(
+            self.agent.context, [successful, failing]
+        )
+
+        self.assertEqual([result.tool_call_id for result in results], [
+            "call-ok", "call-fail"
+        ])
+        self.assertEqual(results[0].content, "successful result")
+        self.assertFalse(results[0].is_error)
+        self.assertTrue(results[1].is_error)
+        self.assertIn("Tool execution failed", results[1].content)
+
     async def test_malformed_tool_call_is_rejected_without_execution(self):
         """A parse failure from the model must never invoke the MCP tool."""
         await self.agent._ensure_tool_definitions()
