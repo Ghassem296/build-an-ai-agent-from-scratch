@@ -312,33 +312,42 @@ class Agent:
     def _extract_structured_result(
         self, context: ExecutionContext
     ) -> BaseModel | None:
-        """استخراج آبجکت Pydantic از آخرین فراخوانی موفق ``final_answer``.
+        """استخراج آبجکت Pydantic از ``final_answer`` همین step.
 
-        تاریخچه رویدادها را از آخر به اول بررسی می‌کند تا جدیدترین
-        فراخوانی پیدا شود.
+        فقط آخرین رویداد (نتیجه‌ی ابزارهای step جاری) بررسی می‌شود، نه کل
+        تاریخچه. اگر کل تاریخچه بررسی شود، در گفتگوی چندنوبتی با یک
+        context مشترک، پاسخ ``final_answer`` نوبت قبل به‌اشتباه برمی‌گردد.
         """
         if not self.output_tool_name or not self.output_type:
             return None
 
-        for event in reversed(context.get_events()):
-            if not isinstance(event.content, list):
-                continue
+        events = context.get_events()
 
-            for item in event.content:
-                if (
-                    isinstance(item, ToolResult)
-                    and item.name == self.output_tool_name
-                    and not item.is_error
-                ):
-                    try:
-                        data = json.loads(item.content)
-                        return self.output_type.model_validate(data)
-                    except Exception:
-                        logger.exception(
-                            "Failed to parse structured output from "
-                            "final_answer tool result"
-                        )
-                        return None
+        if not events:
+            return None
+
+        last_event = events[-1]
+
+        if last_event.type != "tool" or not isinstance(
+            last_event.content, list
+        ):
+            return None
+
+        for item in last_event.content:
+            if (
+                isinstance(item, ToolResult)
+                and item.name == self.output_tool_name
+                and not item.is_error
+            ):
+                try:
+                    data = json.loads(item.content)
+                    return self.output_type.model_validate(data)
+                except Exception:
+                    logger.exception(
+                        "Failed to parse structured output from "
+                        "final_answer tool result"
+                    )
+                    return None
 
         return None
     # ← [4.7] پایان متد جدید

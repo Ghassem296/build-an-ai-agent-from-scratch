@@ -195,6 +195,70 @@ class StructuredOutputTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, "plain answer")
         self.assertIsInstance(result, str)
 
+    async def test_previous_turn_final_answer_is_not_reused(self):
+        """A shared context must not leak the last turn's final_answer.
+
+        Turn 1 answers immediately. In turn 2 the model first calls another
+        tool and only then answers; the stale turn-1 result must be ignored.
+        """
+        from types import SimpleNamespace
+
+        session = make_mcp_session(tools=[
+            {
+                "name": "search_web",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                    "required": ["query"],
+                },
+            }
+        ])
+        session.call_tool = AsyncMock(
+            return_value=SimpleNamespace(
+                content=[SimpleNamespace(text="found it")],
+                isError=False,
+            )
+        )
+
+        llm = MagicMock()
+        llm.complete = AsyncMock(side_effect=[
+            # turn 1: answers right away
+            make_llm_response([
+                ToolCall(
+                    id="a1",
+                    name="final_answer",
+                    arguments={"sentiment": "positive", "confidence": 0.9},
+                )
+            ]),
+            # turn 2, step 1: needs a search first
+            make_llm_response([
+                ToolCall(
+                    id="b1",
+                    name="search_web",
+                    arguments={"query": "reviews"},
+                )
+            ]),
+            # turn 2, step 2: now answers
+            make_llm_response([
+                ToolCall(
+                    id="b2",
+                    name="final_answer",
+                    arguments={"sentiment": "negative", "confidence": 0.7},
+                )
+            ]),
+        ])
+
+        agent = Agent(llm, session, output_type=Sentiment)
+        shared = ExecutionContext(execution_id="shared")
+
+        first = await agent.run("I love this!", context=shared)
+        second = await agent.run("Actually it broke.", context=shared)
+
+        self.assertEqual(first.sentiment, "positive")
+        self.assertEqual(second.sentiment, "negative")
+        self.assertEqual(llm.complete.await_count, 3)
+        session.call_tool.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()
