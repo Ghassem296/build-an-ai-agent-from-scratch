@@ -576,10 +576,17 @@ class Agent:
                     is_error=True,
                 )
 
+        # Tool arguments may contain user data, credentials, or other
+        # sensitive values. Log only the argument names, never raw values.
+        argument_names = (
+            sorted(tool_call.arguments)
+            if isinstance(tool_call.arguments, dict)
+            else []
+        )
         logger.debug(
-            "LLM requested MCP tool: %s; arguments=%s",
+            "LLM requested MCP tool: %s; argument_names=%s",
             tool_call.name,
-            tool_call.arguments,
+            argument_names,
         )
 
         result = await self._execute_tool(tool_call)
@@ -706,16 +713,18 @@ class Agent:
             normalized = "\n".join(parts)
 
         if len(normalized) > MAX_TOOL_RESULT_CHARS:
-            logger.warning(
-                "Tool result truncated from %d to %d characters",
-                len(normalized),
-                MAX_TOOL_RESULT_CHARS,
-            )
-            normalized = (
-                normalized[:MAX_TOOL_RESULT_CHARS]
-                + f"\n\n[truncated: {len(normalized) - MAX_TOOL_RESULT_CHARS} "
-                f"characters omitted]"
-            )
+            original_length = len(normalized)
+            suffix = f"\n\n[truncated: {original_length} characters omitted]"
+            prefix_length = max(0, MAX_TOOL_RESULT_CHARS - len(suffix))
+            omitted = original_length - prefix_length
+            suffix = f"\n\n[truncated: {omitted} characters omitted]"
+            # Keep the marker inside the configured limit too.
+            prefix_length = max(0, MAX_TOOL_RESULT_CHARS - len(suffix))
+            omitted = original_length - prefix_length
+            suffix = f"\n\n[truncated: {omitted} characters omitted]"
+            normalized = normalized[:prefix_length] + suffix
+            if len(normalized) > MAX_TOOL_RESULT_CHARS:
+                normalized = normalized[:MAX_TOOL_RESULT_CHARS]
 
         return normalized
 
