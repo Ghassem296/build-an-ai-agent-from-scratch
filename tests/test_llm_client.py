@@ -320,6 +320,12 @@ class TestLlmClient(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             LlmClient(model="test-model", timeout=0)
 
+    async def test_constructor_rejects_non_finite_timeout(self):
+        for timeout in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(timeout=timeout):
+                with self.assertRaisesRegex(ValueError, "finite"):
+                    LlmClient(model="test-model", timeout=timeout)
+
     async def test_constructor_rejects_invalid_temperature(self):
         with self.assertRaises(ValueError):
             LlmClient(model="test-model", temperature=3)
