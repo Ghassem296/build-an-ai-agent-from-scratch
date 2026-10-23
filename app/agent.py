@@ -296,11 +296,19 @@ class Agent:
 
         schema = self.output_type.model_json_schema()
 
-        # پاکسازی اسکیما برای سازگاری با Tool Format
-        schema.pop("$defs", None)
-        schema.pop("title", None)
-        for prop in schema.get("properties", {}).values():
-            prop.pop("title", None)
+        # Keep $defs: nested Pydantic models refer to these definitions through
+        # local $ref values. Removing $defs leaves dangling references and
+        # makes otherwise valid tool schemas impossible to validate.
+        def strip_titles(value: Any) -> None:
+            if isinstance(value, dict):
+                value.pop("title", None)
+                for nested in value.values():
+                    strip_titles(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    strip_titles(nested)
+
+        strip_titles(schema)
 
         self.output_tool_name = "final_answer"
         self._allowed_tools.add("final_answer")
