@@ -50,6 +50,7 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    parse_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -308,6 +309,7 @@ class LlmClient:
                     call_id,
                 )
 
+            parse_error: str | None = None
             if isinstance(raw_arguments, dict):
                 arguments = raw_arguments
             elif isinstance(raw_arguments, str):
@@ -315,31 +317,37 @@ class LlmClient:
                     parsed_arguments = json.loads(raw_arguments or "{}")
                 except json.JSONDecodeError:
                     logger.warning(
-                        "Tool %r returned invalid JSON arguments: %r",
+                        "Tool %r returned invalid JSON arguments",
                         name,
-                        raw_arguments,
                     )
-                    parsed_arguments = {}
+                    parsed_arguments = None
+                    parse_error = "Tool arguments were not valid JSON"
 
-                if not isinstance(parsed_arguments, dict):
+                if parse_error is None and not isinstance(parsed_arguments, dict):
                     logger.warning(
-                        "Tool %r arguments were not a JSON object: %r",
+                        "Tool %r arguments were not a JSON object",
                         name,
-                        parsed_arguments,
                     )
-                    parsed_arguments = {}
+                    parse_error = "Tool arguments must be a JSON object"
+                    parsed_arguments = None
 
-                arguments = parsed_arguments
+                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {}
             else:
                 logger.warning(
-                    "Tool %r returned unsupported argument type: %r",
+                    "Tool %r returned unsupported argument type: %s",
                     name,
-                    type(raw_arguments),
+                    type(raw_arguments).__name__,
                 )
                 arguments = {}
+                parse_error = "Tool arguments have an unsupported type"
 
             content.append(
-                ToolCall(id=call_id, name=name, arguments=arguments)
+                ToolCall(
+                    id=call_id,
+                    name=name,
+                    arguments=arguments,
+                    parse_error=parse_error,
+                )
             )
 
         if not content:
