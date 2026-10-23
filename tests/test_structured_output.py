@@ -17,6 +17,17 @@ class Sentiment(BaseModel):
     confidence: float
 
 
+
+class NestedMetadata(BaseModel):
+    source: str
+    labels: list[str]
+
+
+class StructuredRecord(BaseModel):
+    summary: str
+    metadata: NestedMetadata
+
+
 # ----- Helpers (mock builders) -----
 def make_tool_call(name: str, arguments: dict, call_id: str = "call_1") -> ToolCall:
     return ToolCall(id=call_id, name=name, arguments=arguments)
@@ -59,6 +70,31 @@ class StructuredOutputTests(unittest.IsolatedAsyncioTestCase):
         props = agent._final_answer_tool["function"]["parameters"]["properties"]
         self.assertIn("sentiment", props)
         self.assertIn("confidence", props)
+
+    async def test_nested_model_schema_keeps_local_references_valid(self):
+        """Nested Pydantic models must retain their $defs for $ref resolution."""
+        agent = Agent(MagicMock(), make_mcp_session(), output_type=StructuredRecord)
+        await agent._ensure_tool_definitions()
+
+        schema = agent._final_answer_tool["function"]["parameters"]
+        self.assertIn("$defs", schema)
+        self.assertIn("$ref", schema["properties"]["metadata"])
+
+        import jsonschema
+        jsonschema.validate(
+            instance={
+                "summary": "A summary",
+                "metadata": {"source": "unit test", "labels": ["nested"]},
+            },
+            schema=schema,
+        )
+
+        self.assertNotIn("title", schema)
+        self.assertNotIn("title", schema["$defs"]["NestedMetadata"])
+        self.assertNotIn(
+            "title",
+            schema["$defs"]["NestedMetadata"]["properties"]["source"],
+        )
 
     async def test_no_output_type_leaves_tool_name_none(self):
         """Backward compat: without output_type, no final_answer tool."""
