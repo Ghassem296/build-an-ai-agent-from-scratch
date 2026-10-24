@@ -233,6 +233,32 @@ class StructuredOutputTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(agent._extract_structured_result(ctx))
 
+    async def test_validation_error_does_not_log_rejected_input(self):
+        """Pydantic validation logs must not include rejected field values."""
+        agent = Agent(MagicMock(), make_mcp_session(), output_type=Sentiment)
+        await agent._ensure_tool_definitions()
+
+        sensitive_value = "PRIVATE-SENTINEL-9462"
+        ctx = ExecutionContext(execution_id="t6")
+        ctx.create_event("tool", [ToolResult(
+            tool_call_id="c1",
+            name="final_answer",
+            content=json.dumps({
+                "sentiment": sensitive_value,
+                "confidence": "not-a-number",
+            }),
+            is_error=False,
+        )])
+
+        with self.assertLogs("app.agent", level="WARNING") as captured:
+            result = agent._extract_structured_result(ctx)
+
+        self.assertIsNone(result)
+        log_output = "\\n".join(captured.output)
+        self.assertIn("Failed to parse structured output", log_output)
+        self.assertNotIn(sensitive_value, log_output)
+        self.assertNotIn("not-a-number", log_output)
+
     async def test_run_returns_pydantic_object(self):
         """End-to-end: run() with output_type returns a Pydantic instance."""
         session = make_mcp_session()
