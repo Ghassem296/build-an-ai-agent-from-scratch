@@ -28,6 +28,12 @@ class StructuredRecord(BaseModel):
     metadata: NestedMetadata
 
 
+
+class ReportWithTitle(BaseModel):
+    title: str
+    summary: str
+
+
 # ----- Helpers (mock builders) -----
 def make_tool_call(name: str, arguments: dict, call_id: str = "call_1") -> ToolCall:
     return ToolCall(id=call_id, name=name, arguments=arguments)
@@ -94,6 +100,24 @@ class StructuredOutputTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(
             "title",
             schema["$defs"]["NestedMetadata"]["properties"]["source"],
+        )
+
+    async def test_property_named_title_is_preserved(self):
+        """A real field named 'title' must survive annotation cleanup."""
+        agent = Agent(MagicMock(), make_mcp_session(), output_type=ReportWithTitle)
+        await agent._ensure_tool_definitions()
+
+        schema = agent._final_answer_tool["function"]["parameters"]
+        self.assertIn("title", schema["properties"])
+        self.assertEqual(schema["properties"]["title"]["type"], "string")
+        # The property's own JSON Schema title annotation is still stripped.
+        self.assertNotIn("title", schema["properties"]["title"])
+
+        import jsonschema
+
+        jsonschema.validate(
+            instance={"title": "Monthly report", "summary": "Revenue grew."},
+            schema=schema,
         )
 
     async def test_mcp_tool_name_collision_is_rejected(self):
