@@ -346,14 +346,66 @@ class Agent:
         # Keep $defs: nested Pydantic models refer to these definitions through
         # local $ref values. Removing $defs leaves dangling references and
         # makes otherwise valid tool schemas impossible to validate.
-        def strip_titles(value: Any) -> None:
-            if isinstance(value, dict):
-                value.pop("title", None)
-                for nested in value.values():
-                    strip_titles(nested)
-            elif isinstance(value, list):
-                for nested in value:
-                    strip_titles(nested)
+        def strip_titles(schema_node: Any) -> None:
+            """Remove schema annotations without deleting property names.
+
+            JSON Schema uses "title" both as an annotation on schema nodes
+            and, independently, as a valid property name. Traverse
+            schema-bearing keywords explicitly so maps such as "properties"
+            and "$defs" are not mistaken for schema nodes themselves.
+            """
+            if not isinstance(schema_node, dict):
+                return
+
+            schema_node.pop("title", None)
+
+            schema_map_keywords = {
+                "$defs",
+                "definitions",
+                "properties",
+                "patternProperties",
+                "dependentSchemas",
+            }
+            schema_single_keywords = {
+                "additionalProperties",
+                "unevaluatedProperties",
+                "propertyNames",
+                "contains",
+                "not",
+                "if",
+                "then",
+                "else",
+                "contentSchema",
+                "additionalItems",
+                "unevaluatedItems",
+            }
+            schema_array_keywords = {
+                "allOf",
+                "anyOf",
+                "oneOf",
+                "prefixItems",
+            }
+
+            for keyword, child in schema_node.items():
+                if keyword in schema_map_keywords and isinstance(child, dict):
+                    for child_schema in child.values():
+                        strip_titles(child_schema)
+                elif keyword == "items":
+                    if isinstance(child, dict):
+                        strip_titles(child)
+                    elif isinstance(child, list):
+                        for child_schema in child:
+                            strip_titles(child_schema)
+                elif keyword in schema_array_keywords and isinstance(child, list):
+                    for child_schema in child:
+                        strip_titles(child_schema)
+                elif keyword in schema_single_keywords and isinstance(child, dict):
+                    strip_titles(child)
+                elif keyword == "dependencies" and isinstance(child, dict):
+                    # Draft 7 allowed either a schema or a property-name list.
+                    for dependency in child.values():
+                        if isinstance(dependency, dict):
+                            strip_titles(dependency)
 
         strip_titles(schema)
 
