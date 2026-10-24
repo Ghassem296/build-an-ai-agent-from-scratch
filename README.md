@@ -94,6 +94,7 @@ All settings are read from the environment (`.env` is loaded automatically).
 | `XAI_1_API_KEY` | — | Deprecated alias for `LLM_API_KEY`. |
 | `LLM_TEMPERATURE` | `0` | 0–2. |
 | `LLM_TIMEOUT` | `60` | Seconds per LLM request. Use `180` or more for a local model, whose first request has to load it. |
+| `SYSTEM_PROMPT_PROFILE` | `default` | `default` (general assistant) or `finance` (search-first rules for news, markets and live prices). |
 | `AGENT_MAX_STEPS` | `10` | Think-act cycles before the agent is forced to answer. |
 | `AGENT_MAX_CONTEXT_CHARS` | `120000` | Characters of history kept; older turns are dropped beyond it. |
 | `TOOL_TIMEOUT` | `30` | Seconds per tool call. |

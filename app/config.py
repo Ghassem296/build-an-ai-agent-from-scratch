@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import math
 import os
@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 
 
 load_dotenv()
+
+
+# Keep in sync with SYSTEM_PROMPTS in app/agent.py.
+VALID_SYSTEM_PROMPT_PROFILES = ("default", "finance")
 
 
 def _get_int(name: str, default: int) -> int:
@@ -59,6 +63,7 @@ class Settings:
     agent_max_context_chars: int
     tool_timeout: float
     log_level: str
+    system_prompt_profile: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -122,6 +127,17 @@ class Settings:
                 f"LOG_LEVEL must be one of {sorted(valid_levels)}"
             )
 
+        profile = (
+            os.getenv("SYSTEM_PROMPT_PROFILE", "default").strip().lower()
+            or "default"
+        )
+
+        if profile not in VALID_SYSTEM_PROMPT_PROFILES:
+            raise ValueError(
+                "SYSTEM_PROMPT_PROFILE must be one of "
+                f"{list(VALID_SYSTEM_PROMPT_PROFILES)}"
+            )
+
         return cls(
             llm_model=model,
             llm_api_key=api_key,
@@ -132,6 +148,7 @@ class Settings:
             agent_max_context_chars=max_context_chars,
             tool_timeout=tool_timeout,
             log_level=log_level,
+            system_prompt_profile=profile,
         )
 
 

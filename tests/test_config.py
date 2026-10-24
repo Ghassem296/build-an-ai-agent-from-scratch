@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 from unittest.mock import patch
 
 from app.config import Settings, require_api_key
@@ -21,6 +21,7 @@ class TestSettings(unittest.TestCase):
         self.assertEqual(settings.agent_max_steps, 10)
         self.assertEqual(settings.agent_max_context_chars, 120_000)
         self.assertEqual(settings.log_level, "INFO")
+        self.assertEqual(settings.system_prompt_profile, "default")
         self.assertIsNone(settings.llm_api_key)
         self.assertIsNone(settings.llm_api_base)
 
@@ -130,6 +131,42 @@ class TestSettings(unittest.TestCase):
         with self.assertRaisesRegex(
             ValueError, "AGENT_MAX_CONTEXT_CHARS"
         ):
+            Settings.from_env()
+
+    @patch.dict(
+        "os.environ",
+        {**BASE_ENV, "SYSTEM_PROMPT_PROFILE": "finance"},
+        clear=True,
+    )
+    def test_system_prompt_profile_is_loaded(self):
+        settings = Settings.from_env()
+        self.assertEqual(settings.system_prompt_profile, "finance")
+
+    @patch.dict(
+        "os.environ",
+        {**BASE_ENV, "SYSTEM_PROMPT_PROFILE": "  Finance "},
+        clear=True,
+    )
+    def test_system_prompt_profile_is_normalized(self):
+        settings = Settings.from_env()
+        self.assertEqual(settings.system_prompt_profile, "finance")
+
+    @patch.dict(
+        "os.environ",
+        {**BASE_ENV, "SYSTEM_PROMPT_PROFILE": ""},
+        clear=True,
+    )
+    def test_blank_system_prompt_profile_uses_default(self):
+        settings = Settings.from_env()
+        self.assertEqual(settings.system_prompt_profile, "default")
+
+    @patch.dict(
+        "os.environ",
+        {**BASE_ENV, "SYSTEM_PROMPT_PROFILE": "nonsense"},
+        clear=True,
+    )
+    def test_invalid_system_prompt_profile_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "SYSTEM_PROMPT_PROFILE"):
             Settings.from_env()
 
 

@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import asyncio
 import logging
 from pathlib import Path
 
-from app.agent import Agent
+from app.agent import SYSTEM_PROMPTS, Agent
 from app.config import get_settings, require_api_key
 from app.execution_context import ExecutionContext
 from app.llm_client import LlmClient
@@ -61,6 +61,7 @@ def build_agent(session: object) -> Agent:
         mcp_session=session,
         tool_timeout=settings.tool_timeout,
         max_context_chars=settings.agent_max_context_chars,
+        system_prompt=SYSTEM_PROMPTS[settings.system_prompt_profile],
     )
 
 
@@ -111,8 +112,8 @@ async def interactive_loop() -> None:
                 break
 
             if prompt.lower() in {"q", "exit", "quit"}:
-                 print("Goodbye!")
-                 break
+                print("Goodbye!")
+                break
 
             if not prompt:
                 continue
