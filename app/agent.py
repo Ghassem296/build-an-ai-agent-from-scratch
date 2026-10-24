@@ -461,9 +461,13 @@ class Agent:
                     data = json.loads(item.content)
                     return self.output_type.model_validate(data)
                 except Exception:
-                    logger.exception(
+                    # Pydantic validation errors can contain rejected input
+                    # values. Log only the exception type, not its message or
+                    # traceback, to avoid writing sensitive data to application logs.
+                    logger.warning(
                         "Failed to parse structured output from "
-                        "final_answer tool result"
+                        "final_answer tool result (%s)",
+                        type(exc).__name__,
                     )
                     return None
 
