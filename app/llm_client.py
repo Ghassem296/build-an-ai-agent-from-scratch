@@ -26,10 +26,7 @@ _DEFAULT_MODEL_METADATA: dict[str, Any] = {
 
 
 def _register_model(model: str) -> None:
-    """Register a model with LiteLLM if it isn't already known.
-
-    This is a no-op for models LiteLLM already knows about.
-    """
+    """Register a model with LiteLLM if it isn't already known."""
     try:
         litellm.get_model_info(model)
         return
@@ -37,7 +34,7 @@ def _register_model(model: str) -> None:
         pass
 
     litellm.register_model({model: _DEFAULT_MODEL_METADATA})
-    logger.debug("Registered unknown model %s with default metadata", model)
+    logger.debug("Registered unknown model %s", model)
 
 
 @dataclass(slots=True)
@@ -67,7 +64,6 @@ class LlmRequest:
     messages: list[Message | ToolCall | ToolResult]
     tools: list[dict[str, Any]] | None = None
     temperature: float | None = None
-    # ← [4.7] "auto" | "required" | "none" | None
     tool_choice: str | None = None
 
 
@@ -80,9 +76,11 @@ class LlmResponse:
 
 
 class LlmClient:
+    """Asynchronous LiteLLM client supporting local Ollama models."""
+
     def __init__(
         self,
-        model: str = "gemini/gemini-2.5-flash",
+        model: str = "ollama_chat/qwen2.5:3b",
         api_key: str | None = None,
         api_base: str | None = None,
         temperature: float = 0.0,
@@ -134,9 +132,11 @@ class LlmClient:
         if not 0.0 <= temperature <= 2.0:
             raise ValueError("temperature must be between 0 and 2")
 
+        messages = self._build_messages(request.messages)
+
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": self._build_messages(request.messages),
+            "messages": messages,
             "temperature": temperature,
             "timeout": self.timeout,
             "num_retries": self.max_retries,
@@ -154,15 +154,42 @@ class LlmClient:
 
         if tool_definitions:
             payload["tools"] = tool_definitions
-            # ← [4.7] احترام به tool_choice درخواست؛ در غیر این صورت "auto"
-            if request.tool_choice is not None:
-                payload["tool_choice"] = request.tool_choice
-            else:
-                payload["tool_choice"] = "auto"
+            payload["tool_choice"] = (
+                request.tool_choice
+                if request.tool_choice is not None
+                else "auto"
+            )
 
-        logger.debug("Sending request to model %s", self.model)
+        # Diagnostic logging: do not log message contents or credentials.
+        message_chars = sum(
+            len(str(message.get("content") or ""))
+            for message in messages
+            if isinstance(message, dict)
+        )
+        tool_count = len(tool_definitions or [])
 
-        response = await acompletion(**payload)
+        logger.warning(
+            "LLM request diagnostics: model=%s, messages=%d, "
+            "message_chars=%d, tools=%d, timeout=%s",
+            self.model,
+            len(messages),
+            message_chars,
+            tool_count,
+            self.timeout,
+        )
+
+        try:
+            response = await acompletion(**payload)
+        except Exception:
+            logger.exception(
+                "LLM request failed: model=%s, messages=%d, "
+                "message_chars=%d, tools=%d",
+                self.model,
+                len(messages),
+                message_chars,
+                tool_count,
+            )
+            raise
 
         return self._parse_response(response)
 
@@ -195,7 +222,6 @@ class LlmClient:
                     "role": item.role,
                     "content": item.content,
                 }
-
                 messages.append(api_message)
 
                 if item.role == "assistant":
@@ -238,7 +264,6 @@ class LlmClient:
                         ),
                     }
                 )
-
                 open_assistant = None
 
             else:
@@ -307,12 +332,12 @@ class LlmClient:
             if not call_id:
                 call_id = f"call_{uuid.uuid4().hex}"
                 logger.warning(
-                    "Tool call %r had no id; generated fallback %s",
+                    "Tool call %r had no id; generated fallback id",
                     name,
-                    call_id,
                 )
 
             parse_error: str | None = None
+
             if isinstance(raw_arguments, dict):
                 arguments = raw_arguments
             elif isinstance(raw_arguments, str):
@@ -326,7 +351,9 @@ class LlmClient:
                     parsed_arguments = None
                     parse_error = "Tool arguments were not valid JSON"
 
-                if parse_error is None and not isinstance(parsed_arguments, dict):
+                if parse_error is None and not isinstance(
+                    parsed_arguments, dict
+                ):
                     logger.warning(
                         "Tool %r arguments were not a JSON object",
                         name,
@@ -334,7 +361,11 @@ class LlmClient:
                     parse_error = "Tool arguments must be a JSON object"
                     parsed_arguments = None
 
-                arguments = parsed_arguments if isinstance(parsed_arguments, dict) else {}
+                arguments = (
+                    parsed_arguments
+                    if isinstance(parsed_arguments, dict)
+                    else {}
+                )
             else:
                 logger.warning(
                     "Tool %r returned unsupported argument type: %s",

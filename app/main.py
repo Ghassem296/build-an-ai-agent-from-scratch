@@ -110,8 +110,9 @@ async def interactive_loop() -> None:
                 print()
                 break
 
-            if prompt.lower() in {"exit", "quit"}:
-                break
+            if prompt.lower() in {"q", "exit", "quit"}:
+                 print("Goodbye!")
+                 break
 
             if not prompt:
                 continue

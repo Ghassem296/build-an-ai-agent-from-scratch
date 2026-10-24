@@ -64,7 +64,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         model = os.getenv(
             "LLM_MODEL",
-            "gemini/gemini-2.5-flash",
+            "ollama_chat/qwen2.5:3b",
         ).strip()
 
         if not model:
