@@ -1,41 +1,50 @@
 import asyncio
-import os
+from typing import Any
 
-from dotenv import load_dotenv
 from litellm import acompletion
 
-
-load_dotenv()
-
-MODEL_NAME = "openai/gemini-2.5-flash"
-API_BASE = "https://1xai.ir/v1"
-API_KEY = os.getenv("XAI_1_API_KEY")
+from app.config import get_settings, require_api_key
 
 
-async def main():
-    if not API_KEY:
-        print("ERROR: XAI_1_API_KEY was not found in .env")
+TEST_PROMPT = "Reply with exactly: API connection works."
+
+
+async def main() -> None:
+    """Check connectivity using the same provider settings as the app."""
+    try:
+        settings = get_settings()
+        require_api_key(settings)
+    except (RuntimeError, ValueError) as error:
+        print(f"ERROR: {error}")
         return
 
+    endpoint = settings.llm_api_base or "provider default"
     print("Testing API connection...")
-    print(f"Model: {MODEL_NAME}")
-    print(f"Endpoint: {API_BASE}")
+    print(f"Model: {settings.llm_model}")
+    print(f"Endpoint: {endpoint}")
+
+    request: dict[str, Any] = {
+        "model": settings.llm_model,
+        "api_key": settings.llm_api_key,
+        "temperature": settings.llm_temperature,
+        "messages": [
+            {
+                "role": "user",
+                "content": TEST_PROMPT,
+            }
+        ],
+        "timeout": settings.llm_timeout,
+        "num_retries": 0,
+    }
+
+    # Omit api_base for official provider endpoints; LiteLLM selects them
+    # from the model identifier. This also avoids overriding a provider with
+    # a stale, hard-coded endpoint.
+    if settings.llm_api_base:
+        request["api_base"] = settings.llm_api_base
 
     try:
-        response = await acompletion(
-            model=MODEL_NAME,
-            api_base=API_BASE,
-            api_key=API_KEY,
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Reply with exactly: API connection works.",
-                }
-            ],
-            timeout=30,
-            num_retries=0,
-        )
-
+        response = await acompletion(**request)
         print("\nAPI request succeeded.")
 
         message = response.choices[0].message
