@@ -130,9 +130,11 @@ Chapter-by-chapter demo (same agent, fixed prompt, prints the discovered tools):
 uv run python mcp_agent.py
 ```
 
-Quick connectivity checks live in `examples/`: `api_connection_check.py`,
-`web_search_check.py`, `mcp_client.py`, `tool_schema_example.py` and
-`legacy_agent_demo.py` (the pre-refactor single-file loop, kept for comparison).
+Quick connectivity checks live in `examples/`: `api_connection_check.py`
+(uses the same `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_TEMPERATURE`
+and `LLM_TIMEOUT` settings as the main app), `web_search_check.py`,
+`mcp_client.py`, `tool_schema_example.py` and `legacy_agent_demo.py` (the
+pre-refactor single-file loop, kept for comparison).
 
 GAIA evaluation (book section 4.8) reads problems from a local JSON/JSONL file
 with the keys `task_id`, `Question` and `Final answer`. A real run spends API
