@@ -460,7 +460,7 @@ class Agent:
                 try:
                     data = json.loads(item.content)
                     return self.output_type.model_validate(data)
-                except Exception:
+                except Exception as exc:
                     # Pydantic validation errors can contain rejected input
                     # values. Log only the exception type, not its message or
                     # traceback, to avoid writing sensitive data to application logs.
