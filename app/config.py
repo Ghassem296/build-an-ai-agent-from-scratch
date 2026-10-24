@@ -62,13 +62,22 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        model = os.getenv(
-            "LLM_MODEL",
-            "ollama_chat/qwen2.5:3b",
-        ).strip()
+        # The model has no default in code: ``.env`` (or the process
+        # environment) is the only place it is configured.
+        raw_model = os.getenv("LLM_MODEL")
+
+        if raw_model is None:
+            raise ValueError(
+                "LLM_MODEL is not set. Copy .env.example to .env and "
+                "set LLM_MODEL there."
+            )
+
+        model = raw_model.strip()
 
         if not model:
-            raise ValueError("LLM_MODEL cannot be empty")
+            raise ValueError(
+                "LLM_MODEL cannot be empty. Set it in your .env file."
+            )
 
         temperature = _get_float("LLM_TEMPERATURE", 0.0)
         llm_timeout = _get_float("LLM_TIMEOUT", 60.0)

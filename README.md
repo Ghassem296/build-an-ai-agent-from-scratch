@@ -78,7 +78,7 @@ Next, create your local environment file:
 cp .env.example .env             # Windows: copy .env.example .env
 ```
 
-and put your key in it (`LLM_API_KEY=...`).
+and set `LLM_MODEL` and `LLM_API_KEY` in it.
 
 ---
 
@@ -88,20 +88,23 @@ All settings are read from the environment (`.env` is loaded automatically).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LLM_MODEL` | `gemini/gemini-2.5-flash` | LiteLLM model identifier; the default uses LiteLLM's native Gemini provider. |
-| `LLM_API_KEY` | — | **Required.** Provider key. |
+| `LLM_MODEL` | — | **Required.** LiteLLM model identifier, e.g. `ollama_chat/qwen2.5:3b` or `gemini/gemini-2.5-flash`. Read only from `.env`; there is no default in the code. |
+| `LLM_API_KEY` | — | **Required.** Provider key. For a local Ollama server any non-empty value works (for example `ollama`). |
 | `LLM_API_BASE` | — | Optional OpenAI-compatible base URL (proxy, gateway, self-hosted). Leave empty for official APIs. |
 | `XAI_1_API_KEY` | — | Deprecated alias for `LLM_API_KEY`. |
 | `LLM_TEMPERATURE` | `0` | 0–2. |
-| `LLM_TIMEOUT` | `60` | Seconds per LLM request. |
+| `LLM_TIMEOUT` | `60` | Seconds per LLM request. Use `180` or more for a local model, whose first request has to load it. |
 | `AGENT_MAX_STEPS` | `10` | Think-act cycles before the agent is forced to answer. |
 | `AGENT_MAX_CONTEXT_CHARS` | `120000` | Characters of history kept; older turns are dropped beyond it. |
 | `TOOL_TIMEOUT` | `30` | Seconds per tool call. |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
 
-> **Note on `LLM_API_BASE`.** Leave this empty when using the default Gemini
-> provider. Set it only when using an OpenAI-compatible gateway or a
-> self-hosted endpoint, and choose a model identifier compatible with that endpoint.
+> **Note on `LLM_MODEL` and `LLM_API_BASE`.** `LLM_MODEL` is read only from
+> `.env` (or the process environment); the program stops with a clear error if
+> it is missing. Leave `LLM_API_BASE` empty for official cloud APIs. For a local
+> Ollama server use `LLM_MODEL=ollama_chat/<model>` and
+> `LLM_API_BASE=http://127.0.0.1:11434` (`127.0.0.1` rather than `localhost`,
+> which can add a connection delay on Windows), plus a larger `LLM_TIMEOUT`.
 
 ---
 
@@ -117,7 +120,7 @@ Interactive mode (keeps one conversation across turns):
 
 ```bash
 uv run python -m app.main
-# then type your questions; 'exit' or 'quit' ends the session
+# then type your questions; 'q', 'exit' or 'quit' ends the session
 ```
 
 Chapter-by-chapter demo (same agent, fixed prompt, prints the discovered tools):

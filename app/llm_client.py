@@ -80,7 +80,7 @@ class LlmClient:
 
     def __init__(
         self,
-        model: str = "ollama_chat/qwen2.5:3b",
+        model: str,
         api_key: str | None = None,
         api_base: str | None = None,
         temperature: float = 0.0,
