@@ -59,7 +59,7 @@ jobs:
         run: uv run python -m compileall -q app tools examples tests mcp_agent.py
 
       - name: Lint for hard errors (undefined names, syntax errors)
-        run: uvx ruff check --select E9,F63,F7,F82 .
+        run: uv run ruff check --select E9,F63,F7,F82 .
 
       - name: Run tests
         env:
