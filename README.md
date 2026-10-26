@@ -1,17 +1,59 @@
-# Build an AI Agent from Scratch
+# Build an AI Agent Control Loop from Scratch
 
 [![Tests](https://github.com/Ghassem296/build-an-ai-agent-from-scratch/actions/workflows/tests.yml/badge.svg)](https://github.com/Ghassem296/build-an-ai-agent-from-scratch/actions/workflows/tests.yml)
 
-An educational AI agent built on **[LiteLLM](https://docs.litellm.ai/)** and the
-**[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP).
+An educational agent on **[LiteLLM](https://docs.litellm.ai/)** and the
+**[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP) — a
+hand-written think-act loop, with production-grade libraries for the rest.
 
 The agent talks to an LLM, discovers the tools that an MCP server exposes, calls
 them when they help, feeds the results back to the model, and returns a grounded
-final answer. Everything is plain Python — no agent framework is involved, so the
-control loop stays readable.
+final answer. The think-act loop is hand-written in plain Python — no agent
+framework sits between you and the control flow. The LLM and tool layers are
+delegated to LiteLLM and the MCP SDK, which is exactly what a production agent
+would do.
 
-Built while following the book *Build an AI Agent from Scratch* (Manning, by
-Jungjun Hur & Younghee Song).
+> **Note:** This is an unofficial companion implementation inspired by the book
+> *Build an AI Agent from Scratch* (Manning, by Jungjun Hur & Younghee Song).
+> The official book repository is separate. This project is not affiliated with
+> the authors or the publisher.
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/Ghassem296/build-an-ai-agent-from-scratch.git
+cd build-an-ai-agent-from-scratch
+
+uv sync
+cp .env.example .env        # then set LLM_MODEL and LLM_API_KEY
+
+uv run python -m app.main "What is the Model Context Protocol?"
+```
+
+For a local Ollama server, set `LLM_MODEL=ollama_chat/<model>` and
+`LLM_API_BASE=http://127.0.0.1:11434`, plus a larger `LLM_TIMEOUT`.
+
+---
+
+## What is hand-written vs. what comes from libraries
+
+This project is "from scratch" only at the control-loop level. The table below
+makes the boundary explicit, so you know where to look when learning.
+
+| Layer | Hand-written? | Library |
+|---|---|---|
+| Think-act loop (`app/agent.py`) | Yes | — |
+| Turn-aware history truncation (`app/execution_context.py`) | Yes | — |
+| Tool allowlist & schema validation | Yes | `jsonschema` |
+| Event log / `ExecutionContext` | Yes | — |
+| Error handling and safe messages | Yes | — |
+| LLM request/response parsing (`app/llm_client.py`) | No — thin wrapper | `litellm` |
+| MCP session & tool discovery (`app/mcp_runtime.py`) | No — thin wrapper | `mcp[cli]` |
+| MCP server (`tools/mcp_server.py`) | No — built on FastMCP | `mcp[cli]` |
+| Web search tool | No — wrapper | `ddgs` |
+| Environment loading | No — wrapper | `python-dotenv` |
 
 ---
 
@@ -28,12 +70,11 @@ Jungjun Hur & Younghee Song).
   `tool` result. The most recent turn is always preserved.
 - **Bounded tool output** — tool results are capped at 10 000 characters so one
   noisy search cannot blow up the context window.
-- **Truncation is surfaced** &mdash; when the model stops because it hit its
-  output limit (`finish_reason == "length"`), the answer is annotated instead of
-  being passed off as complete.
-- **Character budget for history** &mdash; `AGENT_MAX_CONTEXT_CHARS` drops the
-  oldest turns (never the system prompt or the newest turn) before a request is
-  sent.
+- **Truncation is surfaced** — when the model stops because it hit its output
+  limit (`finish_reason == "length"`), the answer is annotated instead of being
+  passed off as complete.
+- **Character budget for history** — `AGENT_MAX_CONTEXT_CHARS` drops the oldest
+  turns (never the system prompt or the newest turn) before a request is sent.
 - **Timeouts and retries** — each tool call is bounded by `TOOL_TIMEOUT`; web
   search retries 3 times with exponential backoff; LLM calls use LiteLLM's
   `num_retries`.
@@ -43,7 +84,8 @@ Jungjun Hur & Younghee Song).
   data.
 - **Minimal MCP environment** — the subprocess receives an explicit allowlist of
   environment variables, so API keys and tokens never reach it.
-- **Offline automated tests** — the LLM and MCP session are mocked, so the suite does not require API calls.
+- **Offline automated tests** — the LLM and MCP session are mocked, so the suite
+  does not require API calls.
 - **CI matrix** — Python 3.11, 3.12 and 3.13 on Ubuntu; Python 3.13 on Windows.
 
 ---
@@ -185,12 +227,27 @@ Agent.run()
 
 ---
 
+## Design decisions
+
+- **Why LiteLLM instead of raw HTTP?** Provider-agnostic interface, built-in
+  retries, and a stable OpenAI-style message format. Re-implementing this would
+  add no educational value and would make the code brittle.
+- **Why MCP instead of a custom tool protocol?** MCP is an open standard; tools
+  are discovered at runtime instead of being hard-coded. It also gives the agent
+  a clean trust boundary (allowlist + schema validation).
+- **Why a hand-written loop?** So the think-act cycle, truncation, validation,
+  and error handling stay visible, debuggable, and easy to reason about. This is
+  the part worth learning.
+- **Why character budget instead of tokens?** Simplicity. A token-aware budget
+  would be more precise but requires a tokenizer per model; this is a known
+  limitation, listed below.
+
+---
+
 ## Testing
 
 ```bash
 uv run python -m unittest discover -s tests -v
-# or, if you prefer pytest:
-uv run pytest
 ```
 
 The suite is fully offline: the LLM client and the MCP session are replaced with
