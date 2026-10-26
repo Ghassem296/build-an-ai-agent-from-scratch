@@ -69,7 +69,15 @@ uv sync
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install "litellm>=1.83.0" "jsonschema>=4.26.0" "python-dotenv>=1.2.4" \
-            "mcp[cli]>=1.0.0,<2.0.0" "ddgs>=9.16.0"
+            "mcp[cli]>=1.0.0,<2.0.0" "ddgs>=9.16.0" "pydantic>=2.0"
+```
+
+Native provider SDKs (Anthropic, Cohere, Google GenAI, Groq, Mistral) are not
+installed by default because the project never imports them directly. If your
+provider needs one, install the optional extra:
+
+```bash
+uv sync --extra providers        # or: pip install ".[providers]"
 ```
 
 Next, create your local environment file:

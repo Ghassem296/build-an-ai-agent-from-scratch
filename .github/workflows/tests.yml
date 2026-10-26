@@ -50,7 +50,7 @@ jobs:
       # version pinned in .python-version, so every job could run on 3.13
       # instead of the Python version selected by the matrix.
       - name: Install dependencies
-        run: uv sync --python ${{ matrix.python-version }} --all-extras --dev
+        run: uv sync --python ${{ matrix.python-version }} --dev
 
       - name: Show interpreter
         run: uv run python -c "import sys; print(sys.version)"
