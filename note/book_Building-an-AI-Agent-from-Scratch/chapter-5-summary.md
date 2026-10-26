@@ -319,3 +319,189 @@ The most important lessons from Chapter 5 are:
 - A reliable agent should retrieve the information it needs instead of blindly sending all available information to the LLM.
 
 **Overall conclusion:** Chapter 5 explains how to make AI agents more useful and efficient by giving them access to external knowledge, teaching them to retrieve relevant information, and providing mechanisms to control and improve their execution.
+
+---
+
+## Chapter 5 — Teaching Outline and Learning Roadmap
+
+### Teaching Instructions
+
+Teach this chapter step by step, following the outline below. Each lesson should include:
+- A clear explanation of the concept.
+- A practical example, preferably in Python.
+- A discussion of why the concept matters when building AI agents.
+- A small exercise or coding task.
+- A connection to the existing GitHub project when relevant.
+
+Do not skip topics or assume prior knowledge of concepts that have not yet been explained. Clearly distinguish between concepts covered in the book and additional implementation ideas for our project.
+
+### Lesson 1: Knowledge Bases and LLM Limitations
+- What is a knowledge base?
+- What information does an LLM already know?
+- Limitations of an LLM's internal knowledge.
+- Knowledge freshness, missing information, and hallucinations.
+- Why an AI agent may need external knowledge sources.
+- When external retrieval is useful.
+
+### Lesson 2: Retrieval-Augmented Generation (RAG)
+- What is Retrieval-Augmented Generation?
+- The three main stages: retrieval, augmentation, and generation.
+- How retrieved information is added to an LLM prompt.
+- How RAG differs from relying only on the LLM's internal knowledge.
+- Benefits and limitations of RAG.
+- A simple end-to-end RAG example.
+
+### Lesson 3: Search and Retrieval Methods
+- Keyword-based search.
+- Semantic search.
+- Vector search.
+- Graph-based search.
+- Structure-based search.
+- Hybrid search.
+- Strengths and weaknesses of each method.
+- Choosing a search method for a particular task.
+
+### Lesson 4: Embeddings and Similarity
+- What embeddings are.
+- How text is represented as numerical vectors.
+- How semantically similar texts can have similar embeddings.
+- The role of embedding models.
+- Cosine similarity and its intuition.
+- Comparing text chunks using similarity scores.
+- A practical Python example.
+- Important limitations of embedding-based retrieval.
+
+### Lesson 5: Document Chunking
+- Why long documents are divided into smaller chunks.
+- What a chunk is.
+- Chunk size and chunk overlap.
+- The effects of chunk size on retrieval quality and context.
+- The trade-offs between small and large chunks.
+- Example settings: `chunk_size=500` and `chunk_overlap=50`.
+- How to choose and evaluate chunking settings.
+- A practical document-chunking exercise.
+
+### Lesson 6: Building a Basic Vector Retrieval Pipeline
+- Loading and preparing documents.
+- Splitting documents into chunks.
+- Generating embeddings.
+- Storing embeddings in a vector store.
+- Embedding a user query.
+- Retrieving the most relevant chunks.
+- Supplying retrieved chunks to the LLM.
+- Generating an answer grounded in retrieved information.
+- Understanding the difference between a conceptual example and a production-ready implementation.
+
+### Lesson 7: Improving Retrieval Quality and Reducing Token Usage
+- Why sending an entire knowledge base to an LLM is inefficient.
+- Selecting relevant information instead of sending everything.
+- Ranking retrieved chunks by relevance.
+- Choosing the top-k results.
+- Understanding the trade-off between context size and answer quality.
+- Measuring token usage before and after targeted retrieval.
+- Interpreting the chapter's example of reducing the input from 37,312 tokens to 304 tokens.
+- Why token reduction depends on the documents, query, and retrieval method.
+- A practical retrieval optimization exercise.
+
+### Lesson 8: Structure-Based Search
+- What structure-based search means.
+- When document structure is more useful than semantic similarity.
+- Working with folders, files, archives, and structured datasets.
+- Listing files and inspecting their organization.
+- Finding relevant information before reading entire files.
+- Understanding the chapter's GAIA dataset preparation example.
+- Deciding when to use structure-based search instead of vector search.
+
+### Lesson 9: Tools for Exploring and Reading Files
+- The purpose of `unzip_file`.
+- The purpose of `list_files`.
+- The purpose of `read_file`.
+- The purpose of `read_media_file`.
+- How file tools help an agent inspect external information.
+- How an agent chooses which tool to call.
+- Tool inputs, outputs, and error handling.
+- Safe file access and limitations.
+- A practical exercise using file exploration tools.
+
+### Lesson 10: Callbacks in AI Agents
+- What callbacks are.
+- Why callbacks are useful in an agent execution lifecycle.
+- Before-LLM and after-LLM callbacks.
+- Before-tool and after-tool callbacks.
+- Before-agent and after-agent callbacks.
+- Inspecting inputs and outputs.
+- Logging, monitoring, validation, and policy enforcement.
+- How callback return values can affect execution.
+- The difference between allowing an operation, skipping it, and replacing its result.
+- Why callback behavior must be verified against the specific framework or implementation.
+- A practical callback example.
+
+### Lesson 11: Human-in-the-Loop (HITL)
+- What Human-in-the-Loop means.
+- Why agents sometimes need human approval.
+- Using `input()` as a simple demonstration.
+- Pausing an agent before a sensitive action.
+- Approving, rejecting, or modifying a proposed action.
+- Human review of tool calls and their results.
+- The difference between a learning example and a production approval workflow.
+- Designing clear approval boundaries.
+- A practical HITL exercise.
+
+### Lesson 12: Compressing and Filtering Search Results
+- Why retrieved results may contain irrelevant information.
+- Selecting only the most useful chunks.
+- Ranking and filtering search results.
+- Returning the top three results when appropriate.
+- Summarizing retrieved content without losing essential facts.
+- Balancing relevance, completeness, and token cost.
+- Using vector similarity or other ranking methods to improve selection.
+- Evaluating whether compression preserves the information needed to answer a query.
+
+### Lesson 13: Applying Chapter 5 to Our GitHub AI Agent
+- Review the existing project architecture.
+- Understand the responsibilities of `app/agent.py`.
+- Understand the role of `app/llm_client.py`.
+- Understand the MCP runtime in `app/mcp_runtime.py`.
+- Understand the execution context and conversation history.
+- Review the available tools in `tools/mcp_server.py`.
+- Identify which Chapter 5 concepts are already supported.
+- Identify which concepts are not yet implemented.
+- Design a retrieval workflow that fits the current architecture.
+- Decide whether to begin with file-based retrieval, keyword search, or vector search.
+- Integrate retrieval without breaking the existing think-act loop.
+- Consider token budgets, error handling, timeouts, and tool-output limits.
+- Keep retrieval logic modular and testable.
+- Document all new behavior and configuration.
+
+### Lesson 14: Testing and Evaluating the Implementation
+- Write tests for document loading and chunking.
+- Test retrieval with known queries and expected results.
+- Check whether retrieved chunks contain the required information.
+- Test empty results and missing files.
+- Test malformed inputs and tool failures.
+- Measure token usage and response quality.
+- Compare retrieval strategies.
+- Test how the agent behaves when the knowledge base does not contain an answer.
+- Verify that retrieved content is treated as data, not as trusted instructions.
+- Update the project documentation and record known limitations.
+
+### Final Review and Completion Checklist
+
+By the end of this chapter, the learner should be able to:
+
+- [ ] Explain why LLMs may need external knowledge.
+- [ ] Describe the RAG pipeline and its three stages.
+- [ ] Compare keyword, semantic, vector, graph, structure-based, and hybrid search.
+- [ ] Explain embeddings and cosine similarity.
+- [ ] Split documents into chunks and explain chunk size and overlap.
+- [ ] Describe the steps of a basic vector retrieval pipeline.
+- [ ] Explain how retrieval can reduce unnecessary token usage.
+- [ ] Identify situations where structure-based search is appropriate.
+- [ ] Explain the purpose of the file tools covered in the chapter.
+- [ ] Describe callback execution and the effect of callback return values.
+- [ ] Explain when and why Human-in-the-Loop approval is useful.
+- [ ] Filter and compress retrieved information while preserving relevance.
+- [ ] Identify which Chapter 5 concepts exist in our GitHub project and which require new implementation.
+- [ ] Propose, implement, and test an appropriate retrieval improvement for the project.
+
+**Teaching rule:** Complete one lesson at a time. Do not move to the next lesson until the current topic has been explained, demonstrated, and practiced. When implementation is relevant, inspect the current repository before proposing code changes. Never describe a feature as implemented unless the code confirms it.
