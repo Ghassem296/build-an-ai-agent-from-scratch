@@ -24,7 +24,7 @@ dependencies = [
     "ddgs>=9.16.0",
     "jsonschema>=4.26.0",
     "litellm>=1.83.0",
-    "mcp[cli]>=1.0.0,<2.0.0",
+    "mcp[cli]>=1.0.0,<3.0.0",
     "pydantic>=2.0",
     "python-dotenv>=1.2.4",
 ]
