@@ -1,4 +1,4 @@
-﻿"""Standalone demo entry point.
+"""Standalone demo entry point.
 
 This mirrors what ``python -m app.main "<prompt>"`` does and exists for
 readers following the book chapter by chapter. The supported entry point is
