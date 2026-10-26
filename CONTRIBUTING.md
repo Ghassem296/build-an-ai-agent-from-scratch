@@ -20,7 +20,7 @@ These are the same checks CI runs:
 
 ```bash
 uv run python -m compileall -q app tools examples tests mcp_agent.py
-uvx ruff check --select E9,F63,F7,F82 .
+uv run ruff check --select E9,F63,F7,F82 .
 uv run python -m unittest discover -s tests -v
 ```
 
