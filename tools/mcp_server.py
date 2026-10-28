@@ -1,6 +1,8 @@
+
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from typing import Annotated, Any
@@ -9,14 +11,15 @@ from ddgs import DDGS
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+from tools.document_search import search_documents
+
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
-
 logger = logging.getLogger(__name__)
 
 mcp = FastMCP("web-search")
 
-# Indirection so tests can replace the real sleep with an instant stub.
+# امکان جایگزینی sleep در تست‌ها
 _sleep = asyncio.sleep
 
 
@@ -24,11 +27,9 @@ def _search_sync(
     query: str,
     max_results: int,
 ) -> list[dict[str, Any]]:
-    """Synchronous DDGS search (run inside a thread)."""
+    """Run synchronous DDGS search in a worker thread."""
     with DDGS() as ddgs:
-        results = list(
-            ddgs.text(query, max_results=max_results)
-        )
+        results = list(ddgs.text(query, max_results=max_results))
 
     return [
         {
@@ -45,11 +46,11 @@ async def search_web(
     query: str,
     max_results: Annotated[int, Field(ge=1, le=10)] = 5,
 ) -> list[dict[str, Any]]:
-    """Search the web and return a list of relevant results.
+    """Search the web and return relevant results.
 
     Args:
         query: Search query.
-        max_results: Maximum number of results to return, from 1 to 10.
+        max_results: Maximum number of results, from 1 to 10.
     """
     query = query.strip()
 
@@ -61,7 +62,6 @@ async def search_web(
 
     max_attempts = 3
     backoff = 1.0
-
     last_error: Exception | None = None
 
     for attempt in range(1, max_attempts + 1):
@@ -79,6 +79,7 @@ async def search_web(
                 max_attempts,
                 exc,
             )
+
             if attempt < max_attempts:
                 await _sleep(backoff)
                 backoff *= 2
@@ -88,29 +89,35 @@ async def search_web(
         max_attempts,
         last_error,
     )
-    # Keep provider/network details in server logs, not in the tool result
-    # returned to the model or exposed to downstream callers.
+
     raise RuntimeError(
         "Web search is temporarily unavailable. Please try again later."
     ) from None
 
 
-def _fetch_json(url: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Fetch a JSON API response using the Python standard library."""
+def _fetch_json(
+    url: str,
+    params: dict[str, Any],
+) -> dict[str, Any]:
+    """Fetch and decode a JSON API response."""
     from urllib.parse import urlencode
     from urllib.request import Request, urlopen
 
     request_url = f"{url}?{urlencode(params)}"
+
     request = Request(
         request_url,
-        headers={"User-Agent": "build-an-ai-agent-from-scratch/1.0"},
+        headers={
+            "User-Agent": "build-an-ai-agent-from-scratch/1.0"
+        },
     )
+
     with urlopen(request, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def _weather_description(code: int | None) -> str:
-    """Convert a WMO weather code into a readable description."""
+    """Convert a WMO weather code to a readable description."""
     descriptions = {
         0: "Clear sky",
         1: "Mainly clear",
@@ -141,8 +148,10 @@ def _weather_description(code: int | None) -> str:
         96: "Thunderstorm with slight hail",
         99: "Thunderstorm with heavy hail",
     }
+
     if code is None:
         return "Unknown"
+
     return descriptions.get(code, f"Weather code {code}")
 
 
@@ -150,12 +159,13 @@ def _weather_description(code: int | None) -> str:
 async def get_weather(
     city: Annotated[str, Field(min_length=1, max_length=100)],
 ) -> dict[str, Any]:
-    """Get current weather and today's forecast for a city from Open-Meteo.
+    """Get current weather and today's forecast for a city.
 
     Args:
         city: City name, for example Tehran or Berlin.
     """
     city = city.strip()
+
     if not city:
         raise ValueError("city cannot be empty")
 
@@ -170,11 +180,17 @@ async def get_weather(
                 "format": "json",
             },
         )
+
         locations = location_data.get("results", [])
+
         if not locations:
-            return {"city": city, "error": f"No location found for '{city}'."}
+            return {
+                "city": city,
+                "error": f"No location found for '{city}'.",
+            }
 
         place = locations[0]
+
         forecast = await asyncio.to_thread(
             _fetch_json,
             "https://api.open-meteo.com/v1/forecast",
@@ -197,8 +213,12 @@ async def get_weather(
                 "timezone": "auto",
             },
         )
+
     except Exception as exc:
-        logger.warning("Weather lookup failed (%s)", type(exc).__name__)
+        logger.warning(
+            "Weather lookup failed (%s)",
+            type(exc).__name__,
+        )
         raise RuntimeError(
             "Weather data is temporarily unavailable. Please try again later."
         ) from None
@@ -206,6 +226,7 @@ async def get_weather(
     current = forecast.get("current", {})
     daily = forecast.get("daily", {})
     hourly = forecast.get("hourly", {})
+
     times = hourly.get("time", [])
     temperatures = hourly.get("temperature_2m", [])
     rain_chances = hourly.get("precipitation_probability", [])
@@ -214,7 +235,9 @@ async def get_weather(
     hourly_forecast = [
         {
             "time": times[i],
-            "temperature_c": temperatures[i] if i < len(temperatures) else None,
+            "temperature_c": (
+                temperatures[i] if i < len(temperatures) else None
+            ),
             "precipitation_probability_percent": (
                 rain_chances[i] if i < len(rain_chances) else None
             ),
@@ -242,11 +265,15 @@ async def get_weather(
             "humidity_percent": current.get("relative_humidity_2m"),
             "wind_speed_kmh": current.get("wind_speed_10m"),
             "precipitation_mm": current.get("precipitation"),
-            "conditions": _weather_description(current.get("weather_code")),
+            "conditions": _weather_description(
+                current.get("weather_code")
+            ),
         },
         "today": {
             "date": daily_value("time"),
-            "conditions": _weather_description(daily_value("weather_code")),
+            "conditions": _weather_description(
+                daily_value("weather_code")
+            ),
             "temperature_min_c": daily_value("temperature_2m_min"),
             "temperature_max_c": daily_value("temperature_2m_max"),
             "precipitation_probability_max_percent": daily_value(
@@ -257,6 +284,32 @@ async def get_weather(
         },
         "hourly_forecast": hourly_forecast,
     }
+
+
+@mcp.tool()
+async def search_documents_tool(
+    query: str,
+    top_k: int = 3,
+) -> list[dict[str, str | float]]:
+    """Search the local knowledge base using semantic similarity.
+
+    Args:
+        query: The question or search query.
+        top_k: Number of documents to return, from 1 to 10.
+    """
+    query = query.strip()
+
+    if not query:
+        raise ValueError("query cannot be empty")
+
+    if not 1 <= top_k <= 10:
+        raise ValueError("top_k must be between 1 and 10")
+
+    return await asyncio.to_thread(
+        search_documents,
+        query,
+        top_k,
+    )
 
 
 if __name__ == "__main__":

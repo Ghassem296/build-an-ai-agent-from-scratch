@@ -47,7 +47,7 @@ ALLOWED_ENV_VARS: tuple[str, ...] = (
 
 
 # Startup is bounded so a broken server cannot hang the CLI forever.
-INIT_TIMEOUT_SECONDS = 10.0
+INIT_TIMEOUT_SECONDS = 60.0
 
 
 def build_mcp_environment() -> dict[str, str]:
