@@ -46,10 +46,23 @@ async def search_web(
     query: str,
     max_results: Annotated[int, Field(ge=1, le=10)] = 5,
 ) -> list[dict[str, Any]]:
-    """Search the web and return relevant results.
+    """Search public web sources and return titles, URLs, and snippets.
+
+    Use this tool for:
+    - Official documentation for public technologies and libraries.
+    - Programming and technical questions requiring web research.
+    - Current public information and source verification.
+
+    For questions explicitly asking about official documentation,
+    include the official project or documentation domain in the
+    search query when known.
+
+    Do not use this tool to search the application's local knowledge
+    base or internal documents.
 
     Args:
-        query: Search query.
+        query: Focused web search query. For official documentation,
+            include the project name and official domain when known.
         max_results: Maximum number of results, from 1 to 10.
     """
     query = query.strip()

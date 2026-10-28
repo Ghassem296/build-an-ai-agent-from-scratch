@@ -1,9 +1,11 @@
+
 from __future__ import annotations
 
 import json
 import logging
 import math
 import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
@@ -178,20 +180,56 @@ class LlmClient:
             self.timeout,
         )
 
+        start_time = time.perf_counter()
+
         try:
             response = await acompletion(**payload)
         except Exception:
+            elapsed = time.perf_counter() - start_time
             logger.exception(
-                "LLM request failed: model=%s, messages=%d, "
-                "message_chars=%d, tools=%d",
+                "LLM request failed after %.2f seconds: model=%s, "
+                "messages=%d, message_chars=%d, tools=%d",
+                elapsed,
                 self.model,
                 len(messages),
                 message_chars,
                 tool_count,
             )
             raise
+        else:
+            elapsed = time.perf_counter() - start_time
+            logger.warning(
+                "LLM request completed in %.2f seconds: model=%s",
+                elapsed,
+                self.model,
+            )
 
-        return self._parse_response(response)
+                
+        parsed = self._parse_response(response)
+
+        logger.warning(
+            "LLM response diagnostics: finish_reason=%s, "
+            "content_items=%d, input_tokens=%d, output_tokens=%d",
+            parsed.finish_reason,
+            len(parsed.content),
+            parsed.input_tokens,
+            parsed.output_tokens,
+        )
+
+        for item in parsed.content:
+            if isinstance(item, Message):
+                logger.warning(
+                    "LLM response message: role=%s, content_chars=%d",
+                    item.role,
+                    len(item.content or ""),
+                )
+            elif isinstance(item, ToolCall):
+                logger.warning(
+                    "LLM response tool call: name=%s",
+                    item.name,
+                )
+
+        return parsed
 
     @staticmethod
     def _serialize_tool_call(item: ToolCall) -> dict[str, Any]:
