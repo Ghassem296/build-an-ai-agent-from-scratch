@@ -726,5 +726,72 @@ class TestAgent(unittest.IsolatedAsyncioTestCase):
 
         self.mcp_session.list_tools.assert_awaited_once()
 
+
+    async def test_run_executes_document_search_tool(self):
+        self.mcp_session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="search_documents_tool",
+                    description="Search the local knowledge base",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "top_k": {"type": "integer"},
+                        },
+                        "required": ["query"],
+                    },
+                )
+            ]
+        )
+
+        self.mcp_session.call_tool.return_value = make_mcp_result(
+            "To reset your password, use Forgot Password on the login page."
+        )
+
+        self.llm_client.complete.side_effect = [
+            LlmResponse(
+                content=[
+                    ToolCall(
+                        id="call-doc-search",
+                        name="search_documents_tool",
+                        arguments={
+                            "query": "I forgot my password",
+                            "top_k": 3,
+                        },
+                    )
+                ]
+            ),
+            LlmResponse(
+                content=[
+                    Message(
+                        role="assistant",
+                        content="Use Forgot Password on the login page.",
+                    )
+                ]
+            ),
+        ]
+
+        answer = await self.agent.run("I forgot my password")
+
+        self.assertEqual(
+            answer,
+            "Use Forgot Password on the login page.",
+        )
+        self.mcp_session.call_tool.assert_awaited_once_with(
+            "search_documents_tool",
+            {
+                "query": "I forgot my password",
+                "top_k": 3,
+            },
+        )
+        self.assertEqual(self.llm_client.complete.await_count, 2)
+
+
+
+
+
+
+
 if __name__ == "__main__":
     unittest.main()

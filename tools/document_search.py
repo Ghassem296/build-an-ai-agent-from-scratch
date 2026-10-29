@@ -7,7 +7,9 @@ from sentence_transformers import SentenceTransformer
 
 MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 
-# نمونه اسناد پایگاه دانش
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 80
+
 DOCUMENTS = [
     {
         "id": "doc1",
@@ -39,36 +41,94 @@ DOCUMENTS = [
     },
 ]
 
-# مدل و بردارهای اسناد به‌صورت تنبل بارگذاری می‌شوند.
-# یعنی تا زمان اولین جست‌وجو، مدل بارگذاری نخواهد شد.
+
+def chunk_text(
+    text: str,
+    chunk_size: int = CHUNK_SIZE,
+    overlap: int = CHUNK_OVERLAP,
+) -> list[str]:
+    """Split text into overlapping character-based chunks."""
+
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    if overlap < 0 or overlap >= chunk_size:
+        raise ValueError("overlap must be between 0 and chunk_size - 1")
+
+    text = text.strip()
+    if not text:
+        return []
+
+    chunks = []
+    start = 0
+    step = chunk_size - overlap
+
+    while start < len(text):
+        chunk = text[start : start + chunk_size].strip()
+
+        if chunk:
+            chunks.append(chunk)
+
+        start += step
+
+    return chunks
+
+
+def _build_chunks() -> list[dict[str, str]]:
+    """Split each document and retain its original ID."""
+
+    chunks = []
+
+    for document in DOCUMENTS:
+        for index, text in enumerate(chunk_text(document["text"])):
+            chunks.append(
+                {
+                    "id": document["id"],
+                    "chunk_id": f"{document['id']}_chunk{index}",
+                    "text": text,
+                }
+            )
+
+    return chunks
+
+
 _model: SentenceTransformer | None = None
-_document_embeddings: np.ndarray | None = None
+_document_chunks: list[dict[str, str]] | None = None
+_chunk_embeddings: np.ndarray | None = None
 
 
-def _load_index() -> tuple[SentenceTransformer, np.ndarray]:
-    """Load the embedding model and build the document vectors once."""
-    global _model, _document_embeddings
+def _load_index() -> tuple[
+    SentenceTransformer,
+    list[dict[str, str]],
+    np.ndarray,
+]:
+    """Load the model and build chunk embeddings once."""
+
+    global _model, _document_chunks, _chunk_embeddings
 
     if _model is None:
         _model = SentenceTransformer(MODEL_NAME)
 
-    if _document_embeddings is None:
-        document_texts = [doc["text"] for doc in DOCUMENTS]
+    if _document_chunks is None:
+        _document_chunks = _build_chunks()
 
-        _document_embeddings = _model.encode(
-            document_texts,
+    if _chunk_embeddings is None:
+        chunk_texts = [chunk["text"] for chunk in _document_chunks]
+
+        _chunk_embeddings = _model.encode(
+            chunk_texts,
             normalize_embeddings=True,
             convert_to_numpy=True,
         )
 
-    return _model, _document_embeddings
+    return _model, _document_chunks, _chunk_embeddings
 
 
 def search_documents(
     query: str,
     top_k: int = 3,
 ) -> list[dict[str, str | float]]:
-    """Find documents semantically similar to a query."""
+    """Find semantically similar document chunks."""
 
     query = query.strip()
 
@@ -78,30 +138,26 @@ def search_documents(
     if not 1 <= top_k <= 10:
         raise ValueError("top_k must be between 1 and 10")
 
-    model, document_embeddings = _load_index()
+    model, chunks, embeddings = _load_index()
 
-    # تبدیل پرسش به بردار
     query_embedding = model.encode(
         query,
         normalize_embeddings=True,
         convert_to_numpy=True,
     )
 
-    # برای بردارهای نرمال‌شده، ضرب داخلی برابر cosine similarity است.
-    scores = np.dot(document_embeddings, query_embedding)
-
-    # مرتب‌سازی از بیشترین شباهت به کمترین
+    scores = np.dot(embeddings, query_embedding)
     ranked_indices = np.argsort(scores)[::-1][:top_k]
 
     results: list[dict[str, str | float]] = []
 
     for index in ranked_indices:
-        document = DOCUMENTS[int(index)]
+        chunk = chunks[int(index)]
 
         results.append(
             {
-                "id": document["id"],
-                "text": document["text"],
+                "id": chunk["id"],
+                "text": chunk["text"],
                 "score": round(float(scores[index]), 4),
             }
         )
