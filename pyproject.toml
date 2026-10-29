@@ -28,6 +28,7 @@ dependencies = [
     # together with the mcp upgrade, and re-test a real tool-calling run.
     "litellm>=1.105.6,<1.106",
     "mcp[cli]>=1.0.0,<2.0.0",
+    "numpy>=2.4.6",
     "pydantic>=2.0",
     "python-dotenv>=1.2.4",
 ]
