@@ -31,6 +31,8 @@ dependencies = [
     "numpy>=2.4.6",
     "pydantic>=2.0",
     "python-dotenv>=1.2.4",
+    "sentence-transformers>=6.2.0",
+    "torch==2.15.0",
 ]
 
 [project.optional-dependencies]
@@ -64,3 +66,12 @@ select = ["E9", "F63", "F7", "F82"]
 # pytest is optional; the suite is written with unittest and also runs with
 # ``python -m unittest discover -s tests``.
 testpaths = ["tests"]
+
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
