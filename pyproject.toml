@@ -26,7 +26,7 @@ dependencies = [
     # litellm 1.106+ imports mcp.types.CacheableResult, which only exists in the
     # MCP Python SDK v2; this project is pinned to mcp<2. Raise this cap only
     # together with the mcp upgrade, and re-test a real tool-calling run.
-    "litellm>=1.105.6,<1.106",
+    "litellm>=1.105.6,<1.107",
     "mcp[cli]>=1.0.0,<2.0.0",
     "numpy>=2.4.6",
     "pydantic>=2.0",
