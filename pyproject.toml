@@ -26,11 +26,13 @@ dependencies = [
     # litellm 1.106+ imports mcp.types.CacheableResult, which only exists in the
     # MCP Python SDK v2; this project is pinned to mcp<2. Raise this cap only
     # together with the mcp upgrade, and re-test a real tool-calling run.
-    "litellm>=1.105.6,<1.106",
+    "litellm>=1.105.6,<1.107",
     "mcp[cli]>=1.0.0,<2.0.0",
     "numpy>=2.4.6",
     "pydantic>=2.0",
     "python-dotenv>=1.2.4",
+    "sentence-transformers>=6.2.0",
+    "torch==2.15.0",
 ]
 
 [project.optional-dependencies]
@@ -64,3 +66,12 @@ select = ["E9", "F63", "F7", "F82"]
 # pytest is optional; the suite is written with unittest and also runs with
 # ``python -m unittest discover -s tests``.
 testpaths = ["tests"]
+
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
