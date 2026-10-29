@@ -2,283 +2,390 @@
 
 [![Tests](https://github.com/Ghassem296/build-an-ai-agent-from-scratch/actions/workflows/tests.yml/badge.svg)](https://github.com/Ghassem296/build-an-ai-agent-from-scratch/actions/workflows/tests.yml)
 
-An educational agent on **[LiteLLM](https://docs.litellm.ai/)** and the
-**[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP) — a
-hand-written think-act loop, with production-grade libraries for the rest.
+An educational AI agent built with **[LiteLLM](https://docs.litellm.ai/)** and the **[Model Context Protocol](https://modelcontextprotocol.io/)** (MCP). The project features a hand-written think-act loop, with production-grade libraries handling the LLM and tool communication layers.
 
-The agent talks to an LLM, discovers the tools that an MCP server exposes, calls
-them when they help, feeds the results back to the model, and returns a grounded
-final answer. The think-act loop is hand-written in plain Python — no agent
-framework sits between you and the control flow. The LLM and tool layers are
-delegated to LiteLLM and the MCP SDK, which is exactly what a production agent
-would do.
+The agent sends requests to an LLM, discovers the tools exposed by an MCP server, calls tools when useful, feeds their results back to the model, and returns a final answer. The control loop is implemented in plain Python, without an agent framework.
 
-> **Note:** This is an unofficial companion implementation inspired by the book
-> *Build an AI Agent from Scratch* (Manning, by Jungjun Hur & Younghee Song).
-> The official book repository is separate. This project is not affiliated with
-> the authors or the publisher.
+> **Note:** This is an unofficial companion implementation inspired by *Build an AI Agent from Scratch* (Manning, by Jungjun Hur and Younghee Song). The official book repository is separate. This project is not affiliated with the authors or the publisher.
 
 ---
 
-## Quick start
+## Quick Start
 
 ```bash
 git clone https://github.com/Ghassem296/build-an-ai-agent-from-scratch.git
 cd build-an-ai-agent-from-scratch
 
 uv sync
-cp .env.example .env        # then set LLM_MODEL and LLM_API_KEY
+```
 
+Create your local environment file:
+
+```bash
+# macOS / Linux
+cp .env.example .env
+
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+Configure `LLM_MODEL` and `LLM_API_KEY` in `.env`, then run:
+
+```bash
 uv run python -m app.main "What is the Model Context Protocol?"
 ```
 
-For a local Ollama server, set `LLM_MODEL=ollama_chat/<model>` and
-`LLM_API_BASE=http://127.0.0.1:11434`, plus a larger `LLM_TIMEOUT`.
+For a local Ollama server, configure the appropriate model name and base URL:
 
----
+```dotenv
+LLM_MODEL=ollama_chat/qwen2.5:3b
+LLM_API_KEY=ollama
+LLM_API_BASE=http://127.0.0.1:11434
+LLM_TIMEOUT=300
+```
 
-## What is hand-written vs. what comes from libraries
-
-This project is "from scratch" only at the control-loop level. The table below
-makes the boundary explicit, so you know where to look when learning.
-
-| Layer | Hand-written? | Library |
-|---|---|---|
-| Think-act loop (`app/agent.py`) | Yes | — |
-| Turn-aware history truncation (`app/execution_context.py`) | Yes | — |
-| Tool allowlist & schema validation | Yes | `jsonschema` |
-| Event log / `ExecutionContext` | Yes | — |
-| Error handling and safe messages | Yes | — |
-| LLM request/response parsing (`app/llm_client.py`) | No — thin wrapper | `litellm` |
-| MCP session & tool discovery (`app/mcp_runtime.py`) | No — thin wrapper | `mcp[cli]` |
-| MCP server (`tools/mcp_server.py`) | No — built on FastMCP | `mcp[cli]` |
-| Web search tool | No — wrapper | `ddgs` |
-| Environment loading | No — wrapper | `python-dotenv` |
+Make sure Ollama is installed, running, and has the selected model available locally.
 
 ---
 
 ## Features
 
-- **Tool calling over MCP** — tools live in a separate stdio MCP server and are
-  discovered at runtime; nothing is hard-coded in the agent.
-- **Tool allowlist** — only tools advertised by the MCP server may be executed.
-  Anything else is rejected with an error `ToolResult` instead of being run.
-- **Argument validation** — every tool call is validated against the tool's JSON
-  schema before it reaches the server.
-- **Turn-aware history truncation** — long conversations are trimmed at turn
-  boundaries, so an `assistant` tool call is never separated from its
-  `tool` result. The most recent turn is always preserved.
-- **Bounded tool output** — tool results are capped at 10 000 characters so one
-  noisy search cannot blow up the context window.
-- **Truncation is surfaced** — when the model stops because it hit its output
-  limit (`finish_reason == "length"`), the answer is annotated instead of being
-  passed off as complete.
-- **Character budget for history** — `AGENT_MAX_CONTEXT_CHARS` drops the oldest
-  turns (never the system prompt or the newest turn) before a request is sent.
-- **Timeouts and retries** — each tool call is bounded by `TOOL_TIMEOUT`; web
-  search retries 3 times with exponential backoff; LLM calls use LiteLLM's
-  `num_retries`.
-- **Errors never leak internals** — raw exceptions are logged, while the model
-  (and the user) only sees a safe, generic message.
-- **Prompt-injection aware system prompt** — tool output is treated as untrusted
-  data.
-- **Minimal MCP environment** — the subprocess receives an explicit allowlist of
-  environment variables, so API keys and tokens never reach it.
-- **Offline automated tests** — the LLM and MCP session are mocked, so the suite
-  does not require API calls.
-- **CI matrix** — Python 3.11, 3.12 and 3.13 on Ubuntu; Python 3.13 on Windows.
+- **Hand-written agent loop:** The think-act cycle is implemented directly in Python.
+- **MCP tool discovery:** Tools are discovered from a separate MCP server at runtime.
+- **Tool allowlist:** Only tools advertised by the MCP server can be executed.
+- **Argument validation:** Tool arguments are checked against their JSON schemas before execution.
+- **Web search:** The `search_web` tool searches the web using DuckDuckGo through `ddgs`.
+- **Semantic document search:** The `search_documents_tool` retrieves relevant knowledge-base passages using sentence embeddings and cosine similarity.
+- **Overlapping text chunks:** Documents are split into overlapping chunks to improve retrieval of relevant passages.
+- **Lazy embedding-model loading:** The sentence-transformer model is loaded when document search is first used.
+- **Turn-aware history truncation:** Conversation history is trimmed at turn boundaries to preserve assistant tool calls and their corresponding results.
+- **Bounded tool output:** Tool results are limited to prevent excessively large outputs from overwhelming the context.
+- **Timeouts and retries:** Tool execution and LLM requests use configurable timeouts and retry behavior.
+- **Safer error handling:** Internal exceptions are logged while users receive safe error messages.
+- **Prompt-injection awareness:** Tool output is treated as untrusted data.
+- **Minimal MCP environment:** The MCP subprocess receives an explicit environment-variable allowlist.
+- **Offline automated tests:** Tests mock LLM and MCP interactions and do not require live API calls.
+- **Continuous integration:** The test workflow covers Python 3.11, 3.12, and 3.13 on Ubuntu, plus Python 3.13 on Windows.
+
+---
+
+## What Is Hand-Written vs. Provided by Libraries?
+
+The project is "from scratch" at the control-loop level. The surrounding infrastructure uses existing libraries.
+
+| Layer | Implementation |
+|---|---|
+| Think-act loop (`app/agent.py`) | Hand-written Python |
+| Turn-aware history (`app/execution_context.py`) | Hand-written Python |
+| Tool allowlist and execution flow | Hand-written Python |
+| Tool argument validation | Hand-written logic using `jsonschema` |
+| LLM requests and response parsing (`app/llm_client.py`) | LiteLLM wrapper |
+| MCP sessions and tool discovery (`app/mcp_runtime.py`) | MCP SDK |
+| MCP server (`tools/mcp_server.py`) | FastMCP |
+| Web search | `ddgs` |
+| Semantic document search (`tools/document_search.py`) | Sentence Transformers and NumPy, with hand-written chunking and ranking logic |
+| Environment loading | `python-dotenv` |
 
 ---
 
 ## Requirements
 
-- Python **3.11+**
-- [`uv`](https://docs.astral.sh/uv/) (recommended) or plain `pip`
-- An LLM API key for any provider LiteLLM supports
+- Python **3.11 or newer**
+- [`uv`](https://docs.astral.sh/uv/) (recommended) or `pip`
+- An API key for your chosen LLM provider, or a local Ollama installation
+- Internet access for downloading dependencies and the sentence-transformer model on its first use
+
+Semantic document search uses `sentence-transformers/all-MiniLM-L6-v2`. The model is loaded lazily when document search is first invoked and may need to be downloaded from the model hub. The initial search can therefore take longer than subsequent searches.
+
+The project supports CPU-based embeddings; a CUDA-enabled GPU is not required.
 
 ---
 
 ## Installation
 
-```bash
-git clone https://github.com/Ghassem296/build-an-ai-agent-from-scratch.git
-cd build-an-ai-agent-from-scratch
+### Recommended: uv
 
-# with uv (recommended; creates .venv and installs the exact locked versions)
+```bash
 uv sync
+```
 
-# or with pip — install the modules this project imports directly
+This creates the virtual environment and installs dependencies according to the project configuration and lock file.
+
+### Alternative: pip
+
+Create and activate a virtual environment.
+
+```bash
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install "litellm>=1.83.0" "jsonschema>=4.26.0" "python-dotenv>=1.2.4" \
-            "mcp[cli]>=1.0.0,<2.0.0" "ddgs>=9.16.0" "pydantic>=2.0"
 ```
 
-Native provider SDKs (Anthropic, Cohere, Google GenAI, Groq, Mistral) are not
-installed by default because the project never imports them directly. If your
-provider needs one, install the optional extra:
+On Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+On macOS or Linux:
 
 ```bash
-uv sync --extra providers        # or: pip install ".[providers]"
+source .venv/bin/activate
 ```
 
-Next, create your local environment file:
+Install the project dependencies declared in `pyproject.toml`:
 
 ```bash
-cp .env.example .env             # Windows: copy .env.example .env
+pip install -e .
 ```
 
-and set `LLM_MODEL` and `LLM_API_KEY` in it.
+If your chosen provider requires optional native SDKs, install the provider extras if they are configured in the project:
+
+```bash
+uv sync --extra providers
+```
+
+Create `.env` from `.env.example` and configure your LLM settings before running the agent.
 
 ---
 
 ## Configuration
 
-All settings are read from the environment (`.env` is loaded automatically).
+The application loads configuration from environment variables, including values in `.env`.
 
-| Variable | Default | Meaning |
+| Variable | Default | Description |
 |---|---|---|
-| `LLM_MODEL` | — | **Required.** LiteLLM model identifier, e.g. `ollama_chat/qwen2.5:3b` or `gemini/gemini-2.5-flash`. Read only from `.env`; there is no default in the code. |
-| `LLM_API_KEY` | — | **Required.** Provider key. For a local Ollama server any non-empty value works (for example `ollama`). |
-| `LLM_API_BASE` | — | Optional OpenAI-compatible base URL (proxy, gateway, self-hosted). Leave empty for official APIs. |
-| `XAI_1_API_KEY` | — | Deprecated alias for `LLM_API_KEY`. |
-| `LLM_TEMPERATURE` | `0` | 0–2. |
-| `LLM_TIMEOUT` | `60` | Seconds per LLM request. Use `180` or more for a local model, whose first request has to load it. |
-| `SYSTEM_PROMPT_PROFILE` | `default` | `default` (general assistant) or `finance` (search-first rules for news, markets and live prices). |
-| `AGENT_MAX_STEPS` | `10` | Think-act cycles before the agent is forced to answer. |
-| `AGENT_MAX_CONTEXT_CHARS` | `120000` | Characters of history kept; older turns are dropped beyond it. |
-| `TOOL_TIMEOUT` | `30` | Seconds per tool call. |
-| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. |
+| `LLM_MODEL` | Required | LiteLLM model identifier, such as `ollama_chat/qwen2.5:3b` or a supported cloud-provider model. |
+| `LLM_API_KEY` | Required | Provider API key. For local Ollama, a non-empty placeholder such as `ollama` may be sufficient. |
+| `LLM_API_BASE` | Empty | Optional API base URL for a proxy, gateway, or local server. |
+| `XAI_1_API_KEY` | Deprecated alias | Legacy alias for `LLM_API_KEY`. |
+| `LLM_TEMPERATURE` | `0` | Sampling temperature, normally between 0 and 2. |
+| `LLM_TIMEOUT` | `60` | Timeout in seconds for each LLM request. Local models may need a larger value. |
+| `SYSTEM_PROMPT_PROFILE` | `default` | Selects the `default` or `finance` system-prompt profile. |
+| `AGENT_MAX_STEPS` | `10` | Maximum think-act cycles before the agent is asked to provide a final answer. |
+| `AGENT_MAX_CONTEXT_CHARS` | `120000` | Approximate maximum number of characters retained in conversation history. |
+| `TOOL_TIMEOUT` | `30` | Timeout in seconds for tool execution. |
+| `LOG_LEVEL` | `INFO` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`. |
 
-> **Note on `LLM_MODEL` and `LLM_API_BASE`.** `LLM_MODEL` is read only from
-> `.env` (or the process environment); the program stops with a clear error if
-> it is missing. Leave `LLM_API_BASE` empty for official cloud APIs. For a local
-> Ollama server use `LLM_MODEL=ollama_chat/<model>` and
-> `LLM_API_BASE=http://127.0.0.1:11434` (`127.0.0.1` rather than `localhost`,
-> which can add a connection delay on Windows), plus a larger `LLM_TIMEOUT`.
+`LLM_MODEL` must be configured. For official cloud APIs, leave `LLM_API_BASE` empty unless your provider requires a custom endpoint.
+
+For Ollama, use a model identifier supported by your LiteLLM installation and an appropriate local base URL, such as `http://127.0.0.1:11434`.
 
 ---
 
 ## Usage
 
-Single prompt:
+### Single prompt
 
 ```bash
 uv run python -m app.main "What is the Model Context Protocol?"
 ```
 
-Interactive mode (keeps one conversation across turns):
+### Interactive mode
 
 ```bash
 uv run python -m app.main
-# then type your questions; 'q', 'exit' or 'quit' ends the session
 ```
 
-Chapter-by-chapter demo (same agent, fixed prompt, prints the discovered tools):
+Enter questions in the interactive session. Type `q`, `exit`, or `quit` to finish.
+
+### Chapter-by-chapter demo
 
 ```bash
 uv run python mcp_agent.py
 ```
 
-Quick connectivity checks live in `examples/`: `api_connection_check.py`
-(uses the same `LLM_MODEL`, `LLM_API_KEY`, `LLM_API_BASE`, `LLM_TEMPERATURE`
-and `LLM_TIMEOUT` settings as the main app), `web_search_check.py`,
-`mcp_client.py`, `tool_schema_example.py` and `legacy_agent_demo.py` (the
-pre-refactor single-file loop, kept for comparison).
+This runs the demonstration agent and prints the discovered tools.
 
-GAIA evaluation (book section 4.8) reads problems from a local JSON/JSONL file
-with the keys `task_id`, `Question` and `Final answer`. A real run spends API
-tokens, so start small:
+### Example scripts
+
+The `examples/` directory contains helper scripts for testing connectivity and exploring the project:
+
+- `api_connection_check.py`
+- `web_search_check.py`
+- `mcp_client.py`
+- `tool_schema_example.py`
+- `legacy_agent_demo.py`
+
+### GAIA evaluation
+
+The GAIA evaluation example reads tasks from a local JSON or JSONL file containing the expected task fields.
 
 ```bash
 uv run python -m examples.gaia_agent_eval problems.jsonl --limit 2
-uv run python -m examples.gaia_agent_eval problems.jsonl --no-tools   # baseline
 ```
+
+To run a baseline without tools:
+
+```bash
+uv run python -m examples.gaia_agent_eval problems.jsonl --no-tools
+```
+
+A real evaluation can make LLM requests and consume API credits. Start with a small number of tasks.
 
 ---
 
-## How it works
+## Semantic Document Search
 
+The project includes a small sample knowledge base for demonstrating retrieval-augmented workflows.
+
+The document-search implementation is in `tools/document_search.py`. It uses:
+
+- **Embedding model:** `sentence-transformers/all-MiniLM-L6-v2`
+- **Chunking:** Text is split into chunks of 500 characters with an overlap of 80 characters.
+- **Similarity:** Normalized embeddings are compared using cosine similarity, implemented as a dot product.
+- **Retrieval:** The search function returns the most relevant chunks, including their identifiers, text, and similarity scores.
+- **MCP integration:** The agent can access document search through `search_documents_tool`.
+
+The current knowledge base contains fixed example documents covering topics such as password changes and resets, email updates, and billing.
+
+### Example questions
+
+Try asking the agent questions such as:
+
+```text
+How do I reset my password?
 ```
-prompt
-  │
-  ▼
+
+```text
+How can I update my email address?
+```
+
+```text
+Where can I find information about billing?
+```
+
+When the model decides document retrieval is useful, it can call `search_documents_tool` and use the returned passages to formulate its answer.
+
+Tool selection depends on the LLM and the current prompt; asking a relevant question does not guarantee that the model will always select the document-search tool.
+
+### Current scope
+
+This is an educational implementation. The knowledge base is defined in code and does not currently ingest arbitrary PDF, TXT, or Markdown files. It does not use a vector database or a persistent embedding index.
+
+---
+
+## How It Works
+
+```text
+User prompt
+    |
+    v
 Agent.run()
-  │  seed system prompt ─────────────┐
-  │                                  │ ExecutionContext
-  ├─► step(): truncate → LLM ────────┤ (event history:
-  │        │                         │  system / user /
-  │        ├── no tool calls ──► final answer
-  │        │                         │  assistant / tool)
-  │        └── tool calls ──► act(): validate → MCP call_tool
-  │                                └── ToolResult back into context
-  └─ max_steps reached ──► forced final answer (tools disabled)
+    |
+    v
+Step: prepare context and call LLM
+    |
+    +---- No tool calls ------> Final answer
+    |
+    +---- Tool calls
+              |
+              v
+       Validate tool name
+              |
+              v
+       Validate arguments
+              |
+              v
+       Call MCP tool
+              |
+              v
+       Append tool result
+              |
+              v
+       Continue agent loop
 ```
 
-| Module | Responsibility |
-|---|---|
-| `app/main.py` | CLI, logging setup, single-prompt and interactive modes. |
-| `app/agent.py` | The think-act loop, tool allowlist, schema validation, tool execution. |
-| `app/llm_client.py` | LiteLLM wrapper: builds OpenAI-style messages from events, parses tool calls and usage. |
-| `app/execution_context.py` | Append-only event log plus turn-aware truncation. |
-| `app/config.py` | Environment parsing and validation (`get_settings()`). |
-| `app/mcp_runtime.py` | Minimal subprocess environment and the initialized MCP session. |
-| `tools/mcp_server.py` | FastMCP server exposing the `search_web` tool (DDGS). |
+The agent repeats the think-act cycle until the model produces a final answer or the configured step limit is reached. When the step limit is reached, the agent is asked to answer without further tool calls.
 
 ---
 
-## Design decisions
+## Project Structure
 
-- **Why LiteLLM instead of raw HTTP?** Provider-agnostic interface, built-in
-  retries, and a stable OpenAI-style message format. Re-implementing this would
-  add no educational value and would make the code brittle.
-- **Why MCP instead of a custom tool protocol?** MCP is an open standard; tools
-  are discovered at runtime instead of being hard-coded. It also gives the agent
-  a clean trust boundary (allowlist + schema validation).
-- **Why a hand-written loop?** So the think-act cycle, truncation, validation,
-  and error handling stay visible, debuggable, and easy to reason about. This is
-  the part worth learning.
-- **Why character budget instead of tokens?** Simplicity. A token-aware budget
-  would be more precise but requires a tokenizer per model; this is a known
-  limitation, listed below.
+```text
+app/
+    agent.py               # Hand-written think-act loop
+    config.py              # Environment parsing and validation
+    execution_context.py   # Event history and turn-aware truncation
+    llm_client.py          # LiteLLM wrapper
+    main.py                # CLI and interactive entry point
+    mcp_runtime.py         # MCP session and subprocess setup
+
+tools/
+    mcp_server.py          # MCP tools, including web and document search
+    document_search.py     # Chunking, embeddings, and semantic retrieval
+
+tests/
+    test_agent.py          # Agent behavior tests
+    test_document_search.py # Semantic search tests
+    ...                    # Tests for other modules
+
+examples/                  # Helper scripts and demonstrations
+uv.lock                    # Locked dependency graph
+```
 
 ---
 
 ## Testing
 
+Run the complete test suite:
+
 ```bash
-uv run python -m unittest discover -s tests -v
+uv run pytest tests/ -q
 ```
 
-The suite is fully offline: the LLM client and the MCP session are replaced with
-mocks, so tests never spend tokens or hit the network.
+To run only the semantic document-search tests:
+
+```bash
+uv run pytest tests/test_document_search.py -q
+```
+
+To run the agent tests:
+
+```bash
+uv run pytest tests/test_agent.py -q
+```
+
+The automated tests mock external LLM and MCP interactions, so they do not need live API calls. The semantic-search tests may initialize the embedding model, depending on the test setup and available cache.
 
 ---
 
-## Project layout
+## Design Decisions
 
-```
-app/                agent, LLM client, context, config, MCP runtime, CLI
-tools/mcp_server.py the MCP server (web search tool)
-tests/              unittest suites for every module
-examples/           small hand-run scripts used while writing the book
-uv.lock             pinned dependency graph (commit it)
-```
+### Why LiteLLM instead of raw HTTP?
+
+LiteLLM provides a common interface for different model providers, along with useful request handling and retry capabilities. Reimplementing each provider's API would add complexity without improving the educational value of the control loop.
+
+### Why MCP instead of a custom tool protocol?
+
+MCP provides a standard way for the agent to discover and call tools. The agent can work with tools exposed by the server without hard-coding each tool into its main loop.
+
+### Why a hand-written loop?
+
+The main learning goal is to make the think-act cycle, context management, argument validation, and error handling explicit and easy to inspect.
+
+### Why character-based context limits?
+
+Character counts are simple to implement and understand, but they only approximate token usage. A tokenizer-aware budget would be more precise.
+
+### Why semantic document search?
+
+Semantic retrieval demonstrates how text embeddings can help an agent find relevant knowledge even when a user's wording differs from the wording in the source documents.
 
 ---
 
 ## Limitations
 
-- The web-search tool scrapes DuckDuckGo through `ddgs`; it can be rate-limited.
-- Agent state is in memory only — there is no persistence, resumability or
-  streaming.
-- The history budget is measured in characters, not tokens, so it is an
-  approximation; a tokenizer-aware limit would be more precise.
-- Tool output is treated as untrusted text, but prompt injection is mitigated
-  rather than prevented.
+- The web-search tool relies on DuckDuckGo through `ddgs` and may be rate-limited.
+- The document-search knowledge base contains a small set of fixed example documents.
+- External PDF, TXT, and Markdown ingestion is not implemented.
+- Semantic search downloads a pretrained embedding model when it is not already cached.
+- The first document-search request may be slower while the model is loading.
+- There is no vector database or persistent embedding index.
+- Conversation state is held in memory; persistence, resumability, and streaming are not implemented.
+- Context length is measured in characters rather than tokens.
+- Tool output is treated as untrusted text, but prompt injection is mitigated rather than completely prevented.
 
 ---
 
 ## License
 
-[MIT](LICENSE)
+See the repository for license information.
