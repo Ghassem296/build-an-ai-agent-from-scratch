@@ -21,6 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "chromadb>=1.5.9",
     "ddgs>=9.16.0",
     "jsonschema>=4.26.0",
     # litellm 1.106+ imports mcp.types.CacheableResult, which only exists in the
