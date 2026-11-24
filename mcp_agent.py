@@ -1,19 +1,16 @@
+
 """Standalone demo entry point.
 
-This mirrors what ``python -m app.main "<prompt>"`` does and exists for
-readers following the book chapter by chapter. The supported entry point is
-``app.main``; this module now reuses the shared MCP runtime instead of
-carrying its own copy of the subprocess environment.
-
-Usage::
-
+Usage:
     python mcp_agent.py
+    python mcp_agent.py "Your custom request"
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 from pathlib import Path
 
 from app.agent import Agent
@@ -46,10 +43,12 @@ def create_llm_client() -> LlmClient:
 
 
 async def main() -> None:
-    """Connect to the MCP server and run the demo prompt."""
+    """Connect to the MCP server and run the requested prompt."""
     settings = get_settings()
 
     require_api_key(settings)
+
+    prompt = " ".join(sys.argv[1:]).strip() or DEMO_PROMPT
 
     async with mcp_session(PROJECT_DIR) as session:
         tools_result = await session.list_tools()
@@ -68,7 +67,7 @@ async def main() -> None:
         )
 
         answer = await agent.run(
-            DEMO_PROMPT,
+            prompt,
             max_steps=settings.agent_max_steps,
         )
 
